@@ -1,8 +1,9 @@
 import pygame
 
 pygame.init()
+from settings import SCREEN_WIDTH, SCREEN_HEIGHT, DARK_BG
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 
-screen = pygame.display.set_mode((800, 600))
 pygame.display.set_caption("Roguelike Game")
 BLACK= (0, 0, 0)
 WHITE = (255, 255, 255)
@@ -24,14 +25,14 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-    screen.fill((20, 20, 30))
+    screen.fill((DARK_BG))
     
     pygame.draw.rect(screen, WHITE, quit_button)
     text = font.render("Quit", True, BLACK)
     screen.blit(text, (350, 265))
     pygame.draw.rect(screen, WHITE, Start_button)
     text = font.render("Start", True, BLACK)
-    screen.blit(text, (350, 190))
+    screen.blit(text, (350, 185))
     pygame.display.flip()
 
  
