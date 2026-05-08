@@ -5,5 +5,12 @@ FPS = 60
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 DARK_BG = (20, 20, 30)
+RED = (255, 0, 0)
 
 TITLE = "Roguelike Game"
+
+GRID_ROWS = 3
+GRID_COLS = 5
+GRID_SIZE = 60
+GRID_GAP = 6
+
