@@ -11,6 +11,12 @@ class Button:
         text_image = font.render(self.text, True, (0, 0, 0))
         text_rect = text_image.get_rect(center=self.rect.center)
         screen.blit(text_image, text_rect)
+    
+    def is_clicked(self, mouse_pos):
+        if self.rect.collidepoint(mouse_pos):
+            return True
+        else:
+            return False
 
 
 
