@@ -3,7 +3,8 @@ from button import Button
 from game_state import HOME_MENU, BATTLE , CHARACTER_SELECT
 
 pygame.init()
-from settings import SCREEN_WIDTH, SCREEN_HEIGHT, DARK_BG
+from settings import SCREEN_WIDTH, SCREEN_HEIGHT, DARK_BG, WHITE
+
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 
 pygame.display.set_caption("Roguelike Game")
@@ -26,9 +27,16 @@ while running:
             running = False
 
     screen.fill(DARK_BG)
+    if current_state == HOME_MENU:
+            start_button.draw(screen, font)
+            quit_button.draw(screen, font)
+    else:
+         pass
+    if current_state == CHARACTER_SELECT:
+         
+
     
-    start_button.draw(screen, font)
-    quit_button.draw(screen, font)
+
     pygame.display.flip()
 
  
