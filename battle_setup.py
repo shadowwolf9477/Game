@@ -18,9 +18,8 @@ def start_tutorial_battle(enemies, enemy_grid_data):
 
 def choose_goblin_attack(player_grid_data):
     all_tiles = []
-
-    for row in range(3):
-        for col in range(5):
+    for row in range(GRID_ROWS):
+        for col in range(GRID_COLS):
             all_tiles.append((row, col))
 
     chosen_tiles = random.sample(all_tiles, 2)
