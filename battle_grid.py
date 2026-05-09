@@ -11,5 +11,22 @@ def draw_grid(screen, start_x, start_y, selected_row=None, selected_col=None):
                 pygame.draw.rect(screen, RED, square, 2)
             else:
                 pygame.draw.rect(screen, WHITE, square, 2)
+def create_grid_data():
+    grid = []
 
-            
+    for row in range(GRID_ROWS):
+        grid_row = []
+
+        for col in range(GRID_COLS):
+            tile = {
+                "unit": None,
+                "effect": None,
+                "incoming_attack": None
+            }
+
+            grid_row.append(tile)
+
+        grid.append(grid_row)
+
+    return grid
+
