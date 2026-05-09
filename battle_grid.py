@@ -3,6 +3,7 @@ from settings import GRID_ROWS, GRID_COLS, GRID_SIZE, GRID_GAP, WHITE, RED, ORAN
 
 
 def draw_grid(screen, start_x, start_y, selected_row=None, selected_col=None, grid_data=None):
+    # Draw one 3x5 grid. If grid_data is given, orange attack warnings can appear.
     for row in range(GRID_ROWS):
         y = start_y + row * (GRID_SIZE + GRID_GAP)
 
@@ -21,6 +22,7 @@ def draw_grid(screen, start_x, start_y, selected_row=None, selected_col=None, gr
 
 
 def create_grid_data():
+    # Create tile data for a grid. Later tiles can hold traps, units, attacks, etc.
     grid = []
 
     for row in range(GRID_ROWS):
@@ -32,10 +34,8 @@ def create_grid_data():
                 "effect": None,
                 "incoming_attack": None
             }
-
             grid_row.append(tile)
 
         grid.append(grid_row)
 
     return grid
-

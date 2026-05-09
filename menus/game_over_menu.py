@@ -3,6 +3,7 @@ from settings import WHITE
 
 
 def draw_game_over_menu(screen, font, play_again_button, quit_button):
+    # Draws a popup over the battle screen when the player dies.
     popup_rect = pygame.Rect(220, 180, 360, 220)
     pygame.draw.rect(screen, (30, 30, 40), popup_rect)
     pygame.draw.rect(screen, WHITE, popup_rect, 2)

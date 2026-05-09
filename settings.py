@@ -1,18 +1,19 @@
+# Window settings.
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 FPS = 60
 
+# Colors.
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 DARK_BG = (20, 20, 30)
 RED = (255, 0, 0)
-ORANGE = (255,140,0)
-
+ORANGE = (255, 140, 0)
 
 TITLE = "Roguelike Game"
 
+# Battle grid settings.
 GRID_ROWS = 3
 GRID_COLS = 5
 GRID_SIZE = 60
 GRID_GAP = 6
-

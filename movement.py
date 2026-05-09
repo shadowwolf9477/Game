@@ -2,6 +2,7 @@ from settings import GRID_ROWS, GRID_COLS
 
 
 def move_unit(unit, grid_data, row_change, col_change):
+    # Move a unit and keep the grid tile data synced with its row/col.
     old_row = unit["row"]
     old_col = unit["col"]
 

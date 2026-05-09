@@ -3,6 +3,7 @@ from battle_setup import clear_incoming_attacks, resolve_incoming_attacks, move_
 
 
 def finish_enemy_attack(selected_character, player_row, player_col, player_grid_data, enemy_grid_data, enemies):
+    # This runs once after the enemy attack animation finishes.
     resolve_incoming_attacks(selected_character, player_row, player_col, player_grid_data)
 
     if selected_character["current_hp"] <= 0:

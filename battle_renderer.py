@@ -1,4 +1,3 @@
-
 from settings import WHITE, GRID_SIZE, GRID_GAP
 from battle_grid import draw_grid
 
@@ -15,6 +14,7 @@ def draw_battle(
     player_image,
     satyr_image
 ):
+    # Draw the basic battle UI.
     battle_text = font.render("Battle", True, WHITE)
     screen.blit(battle_text, (340, 100))
 
@@ -27,12 +27,14 @@ def draw_battle(
     )
     screen.blit(hp_text, (60, 160))
 
+    # Player side grid and player sprite.
     draw_grid(screen, 60, 220, player_row, player_col, player_grid_data)
 
     player_x = 60 + player_col * (GRID_SIZE + GRID_GAP)
     player_y = 220 + player_row * (GRID_SIZE + GRID_GAP)
     screen.blit(player_image, (player_x, player_y))
 
+    # Enemy side grid and first enemy sprite.
     if enemies:
         first_enemy = enemies[0]
         draw_grid(screen, 420, 220, first_enemy["row"], first_enemy["col"])

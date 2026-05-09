@@ -2,6 +2,7 @@ import pygame
 
 
 def load_animation_frames(sheet_path, frame_width, frame_height, row, frame_count, scale_size):
+    # Load one sprite sheet and cut one animation row into separate frames.
     sheet = pygame.image.load(sheet_path).convert_alpha()
     frames = []
 
