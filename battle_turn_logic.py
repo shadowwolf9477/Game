@@ -1,4 +1,4 @@
-from game_state import PLAYER_TURN, GAME_OVER
+from state.game_state import PLAYER_TURN, GAME_OVER
 from battle_setup import clear_incoming_attacks, resolve_incoming_attacks, move_enemy_random, choose_goblin_attack
 
 

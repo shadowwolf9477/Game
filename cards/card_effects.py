@@ -2,6 +2,9 @@ from settings import GRID_ROWS, GRID_COLS
 
 
 def character_can_use_card(character, card):
+    if character is None or character["current_hp"] <= 0:
+        return False
+
     # Character-specific cards only allow named users.
     if "usable_characters" in card:
         return character["name"] in card["usable_characters"]
@@ -20,7 +23,7 @@ def character_can_use_card(character, card):
 
 def get_card_display_name(card, character):
     # Some neutral cards get a different name depending on who uses them.
-    if "character_names" in card and character["name"] in card["character_names"]:
+    if character is not None and "character_names" in card and character["name"] in card["character_names"]:
         return card["character_names"][character["name"]]
 
     return card["name"]

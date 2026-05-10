@@ -31,11 +31,11 @@ HP_X = 20
 HP_Y = 20
 
 # Card hand layout along the bottom of the battle screen.
-HAND_X = 80
-HAND_Y = 590
-CARD_WIDTH = 130
-CARD_HEIGHT = 182
-CARD_GAP = 18
+HAND_X = 130
+HAND_Y = 575
+CARD_WIDTH = 170
+CARD_HEIGHT = 220
+CARD_GAP = 22
 
 # Game over popup layout.
 GAME_OVER_POPUP_X = 360

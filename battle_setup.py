@@ -43,12 +43,18 @@ def clear_incoming_attacks(player_grid_data):
 
 
 def resolve_incoming_attacks(player, player_row, player_col, player_grid_data):
+    if player["current_hp"] <= 0:
+        return
+
     # Only the tile the player currently occupies can hurt them right now.
     current_tile = player_grid_data[player_row][player_col]
     incoming_attack = current_tile["incoming_attack"]
 
     if incoming_attack is not None:
         player["current_hp"] -= incoming_attack["damage"]
+
+        if player["current_hp"] < 0:
+            player["current_hp"] = 0
 
 
 def move_enemy_random(enemy, enemy_grid_data):

@@ -15,6 +15,47 @@ from settings import (
 from battle_grid import draw_grid
 
 
+ENERGY_BAR_CACHE = {}
+ENERGY_BAR_SOURCE_RECT = pygame.Rect(0, 20, 98, 16)
+ENERGY_BAR_SCALE = 2
+
+
+def get_energy_bar_image(image_path):
+    # Crop the second-row bar from the UI sheet and scale it for readability.
+    if image_path not in ENERGY_BAR_CACHE:
+        sheet = pygame.image.load(image_path).convert_alpha()
+        bar_image = sheet.subsurface(ENERGY_BAR_SOURCE_RECT)
+        bar_image = pygame.transform.scale(
+            bar_image,
+            (
+                ENERGY_BAR_SOURCE_RECT.width * ENERGY_BAR_SCALE,
+                ENERGY_BAR_SOURCE_RECT.height * ENERGY_BAR_SCALE
+            )
+        )
+        ENERGY_BAR_CACHE[image_path] = bar_image
+
+    return ENERGY_BAR_CACHE[image_path]
+
+
+def draw_energy_bar(screen, current_energy, max_energy, x, y):
+    # Draw an empty bar, then clip the filled bar to match current energy.
+    empty_bar = get_energy_bar_image("assests/UI BARS/empty_bar.png")
+    filled_bar = get_energy_bar_image("assests/UI BARS/energy_bar.png")
+
+    screen.blit(empty_bar, (x, y))
+
+    if max_energy <= 0:
+        return
+
+    energy_ratio = current_energy / max_energy
+    energy_ratio = max(0, min(energy_ratio, 1))
+    filled_width = int(filled_bar.get_width() * energy_ratio)
+
+    if filled_width > 0:
+        filled_area = pygame.Rect(0, 0, filled_width, filled_bar.get_height())
+        screen.blit(filled_bar, (x, y), filled_area)
+
+
 def draw_battle(
     screen,
     font,
@@ -23,6 +64,7 @@ def draw_battle(
     party,
     selected_character,
     current_energy,
+    max_energy,
     player_grid_data,
     enemies,
     player_idle_frame_index,
@@ -45,8 +87,7 @@ def draw_battle(
         )
         screen.blit(hp_text, (HP_X, HP_Y + index * 34))
 
-    energy_text = font.render("Energy: " + str(current_energy), True, WHITE)
-    screen.blit(energy_text, (HP_X, HP_Y + 75))
+    draw_energy_bar(screen, current_energy, max_energy, HP_X, HP_Y + 78)
 
     # Player side uses real grid_data because it needs attack warnings.
     selected_row = None

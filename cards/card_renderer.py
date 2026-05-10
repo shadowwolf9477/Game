@@ -30,15 +30,21 @@ def draw_text_card(screen, font, card, character, x, y, width, height):
     if character is not None:
         card_name = get_card_display_name(card, character)
 
-    name_text = font.render(card_name, True, WHITE)
-    cost_text = font.render("Cost " + str(card["cost"]), True, WHITE)
+    card_font = pygame.font.Font(None, 30)
+    small_card_font = pygame.font.Font(None, 26)
+
+    name_text = card_font.render(card_name, True, WHITE)
+    cost_text = small_card_font.render("Cost " + str(card["cost"]), True, WHITE)
 
     screen.blit(name_text, (x + 8, y + 14))
     screen.blit(cost_text, (x + 8, y + 58))
 
     if "damage" in card:
-        damage_text = font.render("Dmg " + str(card["damage"]), True, WHITE)
+        damage_text = small_card_font.render("Dmg " + str(card["damage"]), True, WHITE)
         screen.blit(damage_text, (x + 8, y + 96))
+
+    type_text = small_card_font.render(card["type"], True, WHITE)
+    screen.blit(type_text, (x + 8, y + height - 34))
 
 
 def get_clicked_card_index(hand, mouse_pos):

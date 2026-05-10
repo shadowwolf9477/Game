@@ -8,34 +8,37 @@ from settings import (
     WHITE,
     FPS,
     GRID_ROWS,
-    GRID_COLS,
-    PLAYER_GRID_X,
-    GRID_Y,
-    GRID_SIZE,
-    GRID_GAP
+    GRID_COLS
 )
-from game_state import HOME_MENU, BATTLE, CHARACTER_SELECT, PLAYER_TURN, ENEMY_TURN, GAME_OVER, MAP, REWARD
+from state.game_state import HOME_MENU, BATTLE, CHARACTER_SELECT, PLAYER_TURN, ENEMY_TURN, GAME_OVER, MAP, REWARD
 from cards.card_sleeves import CARD_SLEEVES
 from cards.sleeve_effects import apply_sleeve, can_apply_sleeve
+from cards.card_effects import character_can_use_card
 
 from battle_setup import start_tutorial_battle, choose_goblin_attack, clear_incoming_attacks
-from map_loader import generate_map
+from maps.map_loader import generate_map
+from screens.map_screen import draw_map_screen, get_clicked_map_node, complete_map_node
+from screens.reward_screen import draw_reward_screen, get_reward_choice_click, get_clicked_reward_deck_card
+from party_manager import (
+    make_party,
+    place_party_on_grid,
+    get_selected_character,
+    get_clicked_character_index,
+    get_first_usable_character_index
+)
 
 from battle_grid import create_grid_data
-from battle_assets import load_battle_assets, load_character_idle_frames
+from loaders.battle_assets import load_battle_assets
 from movement import move_unit
 from menus.game_over_menu import draw_game_over_menu
 from battle_renderer import draw_battle
-from animation_state import update_animation_frame
+from state.animation_state import update_animation_frame
 from battle_turn_logic import finish_enemy_attack
 
 from cards.card_renderer import draw_card_hand, get_clicked_card_index
 from cards.card_effects import play_card
 from cards.card_targeting import get_card_preview_tiles
 from cards.player_deck import build_starting_deck, shuffle_deck, draw_cards
-
-from Characters.archer import archer
-from Characters.warrior import warrior
 
 
 # Pygame setup.
@@ -94,13 +97,10 @@ current_energy = 3
 # map_layers is generated after the tutorial fight and then remembered.
 map_layers = []
 current_map_layer = 0
-completed = 0
-available = 0
 
 # Reward state.
 # reward_mode switches the popup between reward choice and deck-card choice.
 reward_mode = "choose_reward"
-selected_deck_card_index = None
 deck_scroll = 0
 selected_sleeve = None
 
@@ -120,7 +120,7 @@ movement_steps_left = 0
 
 # Battle assets.
 # These frame lists are reused every frame instead of reloading images.
-satyr_idle_frames, satyr_attack_frames = load_battle_assets()
+battle_background, satyr_idle_frames, satyr_attack_frames = load_battle_assets()
 
 
 # Animation state.
@@ -140,49 +140,6 @@ player_animation_speed = 20
 
 
 current_state = HOME_MENU
-
-
-def make_party():
-    # Copy character templates so each run can change HP/position safely.
-    archer_character = archer.copy()
-    warrior_character = warrior.copy()
-
-    archer_character["idle_frames"] = load_character_idle_frames(archer_character)
-    warrior_character["idle_frames"] = load_character_idle_frames(warrior_character)
-
-    return [archer_character, warrior_character]
-
-
-def place_party_on_grid(party, player_grid_data, reset_hp=False):
-    # Write every living party member into the player grid.
-    for character in party:
-        character["row"] = character["starting_row"]
-        character["col"] = character["starting_col"]
-
-        if reset_hp:
-            character["current_hp"] = character["max_hp"]
-
-        player_grid_data[character["row"]][character["col"]]["unit"] = character
-
-
-def get_selected_character(party, selected_character_index):
-    if len(party) == 0:
-        return None
-
-    return party[selected_character_index]
-
-
-def get_clicked_character_index(party, mouse_pos):
-    # Click the character's board tile to choose who will use cards.
-    for index, character in enumerate(party):
-        x = PLAYER_GRID_X + character["col"] * (GRID_SIZE + GRID_GAP)
-        y = GRID_Y + character["row"] * (GRID_SIZE + GRID_GAP)
-        character_rect = pygame.Rect(x, y, GRID_SIZE, GRID_SIZE)
-
-        if character_rect.collidepoint(mouse_pos):
-            return index
-
-    return None
 
 
 running = True
@@ -277,6 +234,11 @@ while running:
                         # E quick-plays the selected non-movement card with the selected character.
                         selected_card = player_hand[selected_card_index]
 
+                        if not character_can_use_card(selected_character, selected_card):
+                            selected_card = None
+                            selected_card_index = None
+                            continue
+
                         if selected_card["effect"] == "move":
                             movement_mode = True
                             movement_card = selected_card
@@ -307,7 +269,6 @@ while running:
                                     movement_card_user = None
                                     movement_preview_path = []
                                     reward_mode = "choose_reward"
-                                    selected_deck_card_index = None
                                     deck_scroll = 0
                                     current_state = REWARD
 
@@ -368,6 +329,12 @@ while running:
                 clicked_character_index = get_clicked_character_index(party, event.pos)
 
                 if clicked_character_index is not None and not movement_mode:
+                    if selected_card_index is not None and current_turn == PLAYER_TURN:
+                        selected_card = player_hand[selected_card_index]
+
+                        if not character_can_use_card(party[clicked_character_index], selected_card):
+                            continue
+
                     selected_character_index = clicked_character_index
                     selected_character = get_selected_character(party, selected_character_index)
 
@@ -386,6 +353,17 @@ while running:
 
                 if clicked_card_index is not None and current_turn == PLAYER_TURN and not movement_mode:
                     selected_card_index = clicked_card_index
+                    selected_card = player_hand[selected_card_index]
+
+                    if not character_can_use_card(selected_character, selected_card):
+                        usable_character_index = get_first_usable_character_index(party, selected_card)
+
+                        if usable_character_index is None:
+                            selected_card_index = None
+                        else:
+                            selected_character_index = usable_character_index
+                            selected_character = get_selected_character(party, selected_character_index)
+
                 if play_card_button.is_clicked(event.pos) and movement_mode and len(movement_preview_path) > 0 and selected_card_index is not None:
                     # In movement mode, the Play Card button confirms and pays for the card.
                     selected_card = player_hand[selected_card_index]
@@ -414,6 +392,10 @@ while running:
                 if play_card_button.is_clicked(event.pos) and selected_card_index is not None and current_turn == PLAYER_TURN and not movement_mode:
                     selected_card = player_hand[selected_card_index]
                     selected_character = get_selected_character(party, selected_character_index)
+
+                    if not character_can_use_card(selected_character, selected_card):
+                        selected_card_index = None
+                        continue
 
                     if selected_card["effect"] == "move":
                         # Movement cards enter preview first; energy is spent on confirmation.
@@ -446,7 +428,6 @@ while running:
                                 movement_card = None
                                 movement_preview_path = []
                                 reward_mode = "choose_reward"
-                                selected_deck_card_index = None
                                 deck_scroll = 0
                                 current_state = REWARD
 
@@ -467,96 +448,78 @@ while running:
                     satyr_attack_frame_index = 0
                     satyr_attack_timer = 0
             if current_state == MAP:
-                # Map nodes remember what has been completed and unlock the next layer.
-                for layer in map_layers:
-                    for node in layer:
-                        node_rect = pygame.Rect(node["x"] - 25, node["y"] - 25, 50, 50)
+                clicked_node = get_clicked_map_node(map_layers, event.pos)
 
-                        if node["available"] and node_rect.collidepoint(event.pos):
-                            node["completed"] = True
-                            node["available"] = False
-                            current_map_layer = node["layer"]
+                if clicked_node is not None:
+                    complete_map_node(map_layers, clicked_node)
+                    current_map_layer = clicked_node["layer"]
 
-                            next_layer_number = current_map_layer + 1
+                    if clicked_node["type"] == "battle" or clicked_node["type"] == "boss":
+                        # Starting a map battle rebuilds grids and reshuffles the whole deck.
+                        player_grid_data = create_grid_data()
+                        enemy_grid_data = create_grid_data()
+                        enemies.clear()
 
-                            if next_layer_number < len(map_layers):
-                                for next_node in map_layers[next_layer_number]:
-                                    next_node["available"] = True
+                        place_party_on_grid(party, player_grid_data)
+                        selected_character = get_selected_character(party, selected_character_index)
 
-                            if node["type"] == "battle" or node["type"] == "boss":
-                                # Starting a map battle rebuilds grids and reshuffles the whole deck.
-                                player_grid_data = create_grid_data()
-                                enemy_grid_data = create_grid_data()
-                                enemies.clear()
+                        start_tutorial_battle(enemies, enemy_grid_data)
+                        choose_goblin_attack(player_grid_data)
 
-                                place_party_on_grid(party, player_grid_data)
-                                selected_character = get_selected_character(party, selected_character_index)
+                        selected_card_index = None
+                        movement_mode = False
+                        movement_card = None
+                        movement_card_user = None
+                        movement_preview_path = []
+                        discard_pile.extend(player_hand)
+                        player_hand.clear()
+                        discard_pile.extend(draw_pile)
+                        draw_pile.clear()
 
-                                start_tutorial_battle(enemies, enemy_grid_data)
-                                choose_goblin_attack(player_grid_data)
+                        draw_pile = shuffle_deck(discard_pile)
+                        discard_pile.clear()
 
-                                selected_card_index = None
-                                movement_mode = False
-                                movement_card = None
-                                movement_card_user = None
-                                movement_preview_path = []
-                                discard_pile.extend(player_hand)
-                                player_hand.clear()
-                                discard_pile.extend(draw_pile)
-                                draw_pile.clear()
+                        draw_cards(draw_pile, discard_pile, player_hand, 5)
 
-                                draw_pile = shuffle_deck(discard_pile)
-                                discard_pile.clear()
+                        current_turn = PLAYER_TURN
+                        current_energy = max_energy
+                        current_state = BATTLE
 
-                                draw_cards(draw_pile, discard_pile, player_hand, 5)
+                    if clicked_node["type"] == "rest":
+                        # Rest is a placeholder reward node: heal a little, then stay on map.
+                        for character in party:
+                            character["current_hp"] += 2
 
-                                current_turn = PLAYER_TURN
-                                current_energy = max_energy
-                                current_state = BATTLE
+                            if character["current_hp"] > character["max_hp"]:
+                                character["current_hp"] = character["max_hp"]
 
-                            if node["type"] == "rest":
-                                # Rest is a placeholder reward node: heal a little, then stay on map.
-                                for character in party:
-                                    character["current_hp"] += 2
+                    if clicked_node["type"] == "shop":
+                        print("Shop clicked")
 
-                                    if character["current_hp"] > character["max_hp"]:
-                                        character["current_hp"] = character["max_hp"]
+                    if clicked_node["type"] == "upgrade":
+                        print("Upgrade clicked")
 
-                            if node["type"] == "shop":
-                                print("Shop clicked")
-
-                            if node["type"] == "upgrade":
-                                print("Upgrade clicked")
-
-                            if node["type"] == "event":
-                                print("Event clicked")
+                    if clicked_node["type"] == "event":
+                        print("Event clicked")
             if current_state == REWARD:
                 # Reward popup first chooses a reward type, then may ask for a deck card.
                 if reward_mode == "choose_reward":
-                    new_card_rect = pygame.Rect(390, 310, 180, 70)
-                    sleeve_rect = pygame.Rect(630, 310, 180, 70)
+                    reward_choice = get_reward_choice_click(event.pos)
 
-                    if new_card_rect.collidepoint(event.pos):
+                    if reward_choice == "new_card":
                         print("New card reward later")
 
-                    if sleeve_rect.collidepoint(event.pos):
+                    if reward_choice == "sleeve":
                         # Premium Sleeve modifies one valid card already in the deck.
                         selected_sleeve = CARD_SLEEVES["premium_sleeve"]
                         reward_mode = "choose_sleeve_card"
 
 
                 elif reward_mode == "choose_sleeve_card":
-                    visible_cards = player_deck[deck_scroll:deck_scroll + 8]
+                    clicked_card = get_clicked_reward_deck_card(player_deck, deck_scroll, event.pos)
 
-                    for index, card in enumerate(visible_cards):
-                        card_x = 150 + (index % 4) * 235
-                        card_y = 250 + (index // 4) * 220
-                        card_rect = pygame.Rect(card_x, card_y, 150, 180)
-
-                        if card_rect.collidepoint(event.pos):
-                            # apply_sleeve returns False for invalid cards, such as movement cards.
-                            if apply_sleeve(selected_sleeve, card):
-                                current_state = MAP
+                    if clicked_card is not None and apply_sleeve(selected_sleeve, clicked_card):
+                        current_state = MAP
 
 
 
@@ -598,27 +561,7 @@ while running:
         screen.blit(title_text, (430, 180))
         archer_button.draw(screen, font)
     if current_state == MAP:
-        # Map nodes are circles for now; later these can become event images.
-        title_text = font.render("Map", True, WHITE)
-        screen.blit(title_text, (560, 30))
-
-        for layer in map_layers:
-            for node in layer:
-                color = (90, 90, 90)
-
-                if node["completed"]:
-                    # Completed nodes show the path the player already took.
-                    color = (80, 220, 120)
-
-                if node["available"]:
-                    # Available nodes are the only ones the player can click.
-                    color = (0, 180, 255)
-
-                pygame.draw.circle(screen, color, (node["x"], node["y"]), 25)
-
-                label_text = font.render(node["type"], True, WHITE)
-                screen.blit(label_text, (node["x"] + 40, node["y"] - 15))
-
+        draw_map_screen(screen, font, map_layers)
 
     if current_state == BATTLE or current_state == GAME_OVER:
         # Keep idle animations moving while battle or game-over overlay is visible.
@@ -666,6 +609,8 @@ while running:
 
     if current_state == BATTLE or current_state == GAME_OVER:
         # Draw the battle underneath game-over so the loss still has context.
+        screen.blit(battle_background, (0, 0))
+
         if enemy_is_attacking:
             satyr_image = satyr_attack_frames[satyr_attack_frame_index]
         else:
@@ -697,6 +642,7 @@ while running:
             party,
             selected_character,
             current_energy,
+            max_energy,
             player_grid_data,
             enemies,
             player_idle_frame_index,
@@ -716,64 +662,16 @@ while running:
         if current_state == GAME_OVER:
             draw_game_over_menu(screen, font, play_again_button, game_over_quit_button)
     if current_state == REWARD:
-        # Reward popup sits on its own screen between combat victory and the map.
-        popup_rect = pygame.Rect(60, 90, 1080, 660)
-        pygame.draw.rect(screen, (30, 30, 40), popup_rect)
-        pygame.draw.rect(screen, WHITE, popup_rect, 2)
-
-        title_text = font.render("Battle Reward", True, WHITE)
-        screen.blit(title_text, (470, 120))
-
-
-        if reward_mode == "choose_reward":
-            # New Card is a placeholder; Sleeve is the first working reward type.
-            new_card_rect = pygame.Rect(390, 310, 180, 70)
-            sleeve_rect = pygame.Rect(630, 310, 180, 70)
-
-            pygame.draw.rect(screen, WHITE, new_card_rect, 2)
-            pygame.draw.rect(screen, WHITE, sleeve_rect, 2)
-
-            new_card_text = font.render("New Card", True, WHITE)
-            sleeve_text = font.render("Sleeve", True, WHITE)
-
-            screen.blit(new_card_text, (410, 330))
-            screen.blit(sleeve_text, (665, 330))
-
-        if reward_mode == "choose_sleeve_card":
-            # Show deck cards so the sleeve can upgrade one existing card.
-            info_text = font.render("Choose attack card", True, WHITE)
-            screen.blit(info_text, (420, 175))
-
-
-            visible_cards = player_deck[deck_scroll:deck_scroll + 8]
-
-            for index, card in enumerate(visible_cards):
-                card_x = 150 + (index % 4) * 235
-                card_y = 250 + (index // 4) * 220
-                card_rect = pygame.Rect(card_x, card_y, 150, 180)
-
-
-
-                if can_apply_sleeve(selected_sleeve, card):
-                    # White border means this card is valid for the selected sleeve.
-                    pygame.draw.rect(screen, WHITE, card_rect, 2)
-                else:
-                    # Gray border means clicking will not apply the sleeve.
-                    pygame.draw.rect(screen, (90, 90, 90), card_rect, 2)
-
-
-                name_text = small_font.render(card["name"], True, WHITE)
-
-                screen.blit(name_text, (card_x, card_y + 20))
-
-                cost_text = small_font.render("Cost " + str(card["cost"]), True, WHITE)
-
-                screen.blit(cost_text, (card_x, card_y + 70))
-
-                if "damage" in card:
-                    damage_text = small_font.render("Dmg " + str(card["damage"]), True, WHITE)
-
-                    screen.blit(damage_text, (card_x, card_y + 115))
+        draw_reward_screen(
+            screen,
+            font,
+            small_font,
+            reward_mode,
+            player_deck,
+            deck_scroll,
+            selected_sleeve,
+            can_apply_sleeve
+        )
 
 
     pygame.display.flip()
