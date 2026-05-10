@@ -13,17 +13,21 @@ CARD_LIBRARY = {
         "image_path": "cards/card_assets/Quick dash.png"
     },
 
-    "bow_shot": {
-        "name": "Bow Shot",
+    "basic_attack": {
+        "name": "Basic Attack",
         "cost": 1,
         "thickness": 0.5,
         "type": "attack",
-        "effect": "bow_shot",
+        "effect": "basic_attack",
         "damage": 1,
-        # Bow Shot uses this as enemy-board spaces starting from the player's column.
+        "usable_tags": ["ranged", "melee"],
+        # Characters read the same range differently: Archer shoots a row, Warrior slashes lanes.
         "range": 2,
-        "description": "Shoot up to 2 tiles ahead. Hit 1 enemy.",
-        "image_path": "cards/card_assets/bow shot.png"
+        "description": "Use this character's basic attack shape.",
+        "character_names": {
+            "Archer": "Bow Shot",
+            "Warrior": "Axe Slash"
+        }
     },
 
     "pierce_shot": {
@@ -36,8 +40,20 @@ CARD_LIBRARY = {
         # Pierce hits more than one enemy, but still respects the player's row.
         "max_targets": 2,
         "range": "player_row",
+        "usable_characters": ["Archer"],
         "description": "Pierce your row. Hit up to 2 enemies.",
         "image_path": "cards/card_assets/pierce shot.png"
+    },
+
+    "cleave": {
+        "name": "Cleave",
+        "cost": 2,
+        "thickness": 0.5,
+        "type": "attack",
+        "effect": "cleave_column",
+        "damage": 2,
+        "usable_characters": ["Warrior"],
+        "description": "Cleave a column. Hit every enemy in that column."
     }
 
 }

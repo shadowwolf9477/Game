@@ -1,7 +1,19 @@
 import pygame
 
 from button import Button
-from settings import SCREEN_WIDTH, SCREEN_HEIGHT, DARK_BG, WHITE, FPS, GRID_ROWS, GRID_COLS
+from settings import (
+    SCREEN_WIDTH,
+    SCREEN_HEIGHT,
+    DARK_BG,
+    WHITE,
+    FPS,
+    GRID_ROWS,
+    GRID_COLS,
+    PLAYER_GRID_X,
+    GRID_Y,
+    GRID_SIZE,
+    GRID_GAP
+)
 from game_state import HOME_MENU, BATTLE, CHARACTER_SELECT, PLAYER_TURN, ENEMY_TURN, GAME_OVER, MAP, REWARD
 from cards.card_sleeves import CARD_SLEEVES
 from cards.sleeve_effects import apply_sleeve, can_apply_sleeve
@@ -10,7 +22,7 @@ from battle_setup import start_tutorial_battle, choose_goblin_attack, clear_inco
 from map_loader import generate_map
 
 from battle_grid import create_grid_data
-from battle_assets import load_battle_assets
+from battle_assets import load_battle_assets, load_character_idle_frames
 from movement import move_unit
 from menus.game_over_menu import draw_game_over_menu
 from battle_renderer import draw_battle
@@ -23,6 +35,7 @@ from cards.card_targeting import get_card_preview_tiles
 from cards.player_deck import build_starting_deck, shuffle_deck, draw_cards
 
 from Characters.archer import archer
+from Characters.warrior import warrior
 
 
 # Pygame setup.
@@ -43,7 +56,7 @@ small_font = pygame.font.Font(None, 34)
 start_button = Button(500, 220, 220, 70, "Start")
 quit_button = Button(500, 310, 220, 70, "Quit")
 
-archer_button = Button(500, 330, 220, 70, "Archer")
+archer_button = Button(450, 330, 330, 70, "Archer + Warrior")
 
 end_turn_button = Button(870, 60, 220, 70, "End turn")
 play_card_button = Button(870, 140, 220, 70, "Play Card")
@@ -53,11 +66,10 @@ game_over_quit_button = Button(650, 390, 160, 70, "Quit")
 
 
 # Player and battle state.
-# The selected character dictionary owns HP/position; these row/col copies
-# make drawing and grid updates easier in the current one-character version.
-player_row = 1
-player_col = 2
-selected_character = ""
+# party holds the two real characters. selected_character is the current card user.
+party = []
+selected_character_index = 0
+selected_character = None
 
 current_turn = PLAYER_TURN
 
@@ -99,6 +111,7 @@ selected_sleeve = None
 # before the character actually moves.
 movement_mode = False
 movement_card = None
+movement_card_user = None
 movement_preview_path = []
 movement_preview_row = 0
 movement_preview_col = 0
@@ -107,7 +120,7 @@ movement_steps_left = 0
 
 # Battle assets.
 # These frame lists are reused every frame instead of reloading images.
-player_idle_frames, satyr_idle_frames, satyr_attack_frames = load_battle_assets()
+satyr_idle_frames, satyr_attack_frames = load_battle_assets()
 
 
 # Animation state.
@@ -128,6 +141,50 @@ player_animation_speed = 20
 
 current_state = HOME_MENU
 
+
+def make_party():
+    # Copy character templates so each run can change HP/position safely.
+    archer_character = archer.copy()
+    warrior_character = warrior.copy()
+
+    archer_character["idle_frames"] = load_character_idle_frames(archer_character)
+    warrior_character["idle_frames"] = load_character_idle_frames(warrior_character)
+
+    return [archer_character, warrior_character]
+
+
+def place_party_on_grid(party, player_grid_data, reset_hp=False):
+    # Write every living party member into the player grid.
+    for character in party:
+        character["row"] = character["starting_row"]
+        character["col"] = character["starting_col"]
+
+        if reset_hp:
+            character["current_hp"] = character["max_hp"]
+
+        player_grid_data[character["row"]][character["col"]]["unit"] = character
+
+
+def get_selected_character(party, selected_character_index):
+    if len(party) == 0:
+        return None
+
+    return party[selected_character_index]
+
+
+def get_clicked_character_index(party, mouse_pos):
+    # Click the character's board tile to choose who will use cards.
+    for index, character in enumerate(party):
+        x = PLAYER_GRID_X + character["col"] * (GRID_SIZE + GRID_GAP)
+        y = GRID_Y + character["row"] * (GRID_SIZE + GRID_GAP)
+        character_rect = pygame.Rect(x, y, GRID_SIZE, GRID_SIZE)
+
+        if character_rect.collidepoint(mouse_pos):
+            return index
+
+    return None
+
+
 running = True
 while running:
 
@@ -137,7 +194,17 @@ while running:
             running = False
         if event.type == pygame.KEYDOWN:
             if current_state == BATTLE and current_turn == PLAYER_TURN:
-                if movement_mode:
+                selected_character = get_selected_character(party, selected_character_index)
+
+                if event.key == pygame.K_g:
+                    # G cancels card/user selection and exits movement preview.
+                    selected_card_index = None
+                    movement_mode = False
+                    movement_card = None
+                    movement_card_user = None
+                    movement_preview_path = []
+
+                elif movement_mode:
                     # Arrow keys build a planned movement path while in card movement mode.
                     row_change = 0
                     col_change = 0
@@ -151,53 +218,105 @@ while running:
                     if event.key == pygame.K_DOWN:
                         row_change = 1
 
-                if row_change != 0 or col_change != 0:
-                    # Clamp preview movement so the planned path stays inside the player grid.
-                    next_row = movement_preview_row + row_change
-                    next_col = movement_preview_col + col_change
+                    if row_change != 0 or col_change != 0:
+                        # Clamp preview movement so the planned path stays inside the player grid.
+                        next_row = movement_preview_row + row_change
+                        next_col = movement_preview_col + col_change
 
-                    next_row = max(0, min(next_row, GRID_ROWS - 1))
-                    next_col = max(0, min(next_col, GRID_COLS - 1))
+                        next_row = max(0, min(next_row, GRID_ROWS - 1))
+                        next_col = max(0, min(next_col, GRID_COLS - 1))
 
-                    previous_tile = None
+                        previous_tile = None
 
-                    if len(movement_preview_path) >= 2:
-                        previous_tile = movement_preview_path[-2]
-                    elif len(movement_preview_path) == 1:
-                        previous_tile = (selected_character["row"], selected_character["col"])
+                        if len(movement_preview_path) >= 2:
+                            previous_tile = movement_preview_path[-2]
+                        elif len(movement_preview_path) == 1:
+                            previous_tile = (movement_card_user["row"], movement_card_user["col"])
 
-                    if previous_tile == (next_row, next_col):
-                        # Walking back onto the previous tile undoes the last planned step.
-                        movement_preview_path.pop()
-                        movement_preview_row = next_row
-                        movement_preview_col = next_col
-                        movement_steps_left += 1
+                        if previous_tile == (next_row, next_col):
+                            # Walking back onto the previous tile undoes the last planned step.
+                            movement_preview_path.pop()
+                            movement_preview_row = next_row
+                            movement_preview_col = next_col
+                            movement_steps_left += 1
 
-                    elif movement_steps_left > 0:
-                        movement_preview_row = next_row
-                        movement_preview_col = next_col
-                        movement_preview_path.append((movement_preview_row, movement_preview_col))
-                        movement_steps_left -= 1
+                        elif movement_steps_left > 0:
+                            movement_preview_row = next_row
+                            movement_preview_col = next_col
+                            movement_preview_path.append((movement_preview_row, movement_preview_col))
+                            movement_steps_left -= 1
 
+                    if event.key == pygame.K_e and len(movement_preview_path) > 0 and selected_card_index is not None:
+                        # E confirms the movement card, then spends/discards it.
+                        selected_card = player_hand[selected_card_index]
+                        card_was_played, current_energy, card_result = play_card(
+                            selected_card,
+                            movement_card_user,
+                            enemies,
+                            current_energy
+                        )
 
-                    if event.key == pygame.K_e and len(movement_preview_path) > 0:
-                        # E confirms the previewed movement and writes it to the real grid.
-                        selected_character["row"] = movement_preview_row
-                        selected_character["col"] = movement_preview_col
+                        if card_was_played:
+                            player_grid_data[movement_card_user["row"]][movement_card_user["col"]]["unit"] = None
+                            movement_card_user["row"] = movement_preview_row
+                            movement_card_user["col"] = movement_preview_col
+                            player_grid_data[movement_card_user["row"]][movement_card_user["col"]]["unit"] = movement_card_user
 
-                        player_grid_data[player_row][player_col]["unit"] = None
-                        player_grid_data[selected_character["row"]][selected_character["col"]]["unit"] = selected_character
+                            played_card = player_hand.pop(selected_card_index)
+                            discard_pile.append(played_card)
+                            selected_card_index = None
 
-                        player_row = selected_character["row"]
-                        player_col = selected_character["col"]
-
-                        movement_mode = False
-                        movement_card = None
-                        movement_preview_path = []
+                            movement_mode = False
+                            movement_card = None
+                            movement_card_user = None
+                            movement_preview_path = []
 
 
                 else:
-                    # Temporary debug movement until cards fully control movement.
+                    if event.key == pygame.K_e and selected_card_index is not None:
+                        # E quick-plays the selected non-movement card with the selected character.
+                        selected_card = player_hand[selected_card_index]
+
+                        if selected_card["effect"] == "move":
+                            movement_mode = True
+                            movement_card = selected_card
+                            movement_card_user = selected_character
+                            movement_preview_row = selected_character["row"]
+                            movement_preview_col = selected_character["col"]
+                            movement_preview_path = []
+                            movement_steps_left = selected_card["move_range"]
+                        else:
+                            card_was_played, current_energy, card_result = play_card(
+                                selected_card,
+                                selected_character,
+                                enemies,
+                                current_energy
+                            )
+
+                            if card_was_played:
+                                played_card = player_hand.pop(selected_card_index)
+                                discard_pile.append(played_card)
+                                selected_card_index = None
+
+                                if len(enemies) == 0:
+                                    # Winning a battle clears warnings and opens rewards before the map.
+                                    clear_incoming_attacks(player_grid_data)
+                                    enemy_grid_data = create_grid_data()
+                                    movement_mode = False
+                                    movement_card = None
+                                    movement_card_user = None
+                                    movement_preview_path = []
+                                    reward_mode = "choose_reward"
+                                    selected_deck_card_index = None
+                                    deck_scroll = 0
+                                    current_state = REWARD
+
+                                    if len(map_layers) == 0:
+                                        # The tutorial battle is fixed; the run map begins after it.
+                                        map_layers = generate_map()
+                                        current_map_layer = 0
+
+                    # Temporary debug movement for the selected party member.
                     if event.key == pygame.K_LEFT:
                         move_unit(selected_character, player_grid_data, 0, -1)
                     if event.key == pygame.K_RIGHT:
@@ -206,9 +325,6 @@ while running:
                         move_unit(selected_character, player_grid_data, -1, 0)
                     if event.key == pygame.K_DOWN:
                         move_unit(selected_character, player_grid_data, 1, 0)
-
-                    player_row = selected_character["row"]
-                    player_col = selected_character["col"]
 
         if event.type == pygame.MOUSEBUTTONDOWN:
             if current_state == HOME_MENU:
@@ -221,17 +337,15 @@ while running:
 
             if current_state == CHARACTER_SELECT:
                 if archer_button.is_clicked(event.pos):
-                    # Character selection starts the fixed tutorial fight.
-                    selected_character = archer
-                    selected_character["row"] = selected_character["starting_row"]
-                    selected_character["col"] = selected_character["starting_col"]
-                    selected_character["current_hp"] = selected_character["max_hp"]
+                    # Character selection starts the fixed tutorial fight with two characters.
+                    party = make_party()
+                    selected_character_index = 0
+                    selected_character = get_selected_character(party, selected_character_index)
 
-                    player_row = selected_character["row"]
-                    player_col = selected_character["col"]
-                    player_grid_data[player_row][player_col]["unit"] = selected_character
+                    player_grid_data = create_grid_data()
+                    place_party_on_grid(party, player_grid_data, True)
 
-                    player_deck = build_starting_deck(selected_character)
+                    player_deck = build_starting_deck(party)
                     draw_pile = shuffle_deck(player_deck)
                     player_hand = []
                     discard_pile = []
@@ -251,65 +365,95 @@ while running:
             if current_state == BATTLE:
                 # Battle clicks either select cards, confirm movement, play cards, or end turn.
                 clicked_card_index = get_clicked_card_index(player_hand, event.pos)
+                clicked_character_index = get_clicked_character_index(party, event.pos)
 
-                if clicked_card_index is not None and current_turn == PLAYER_TURN and not movement_mode:
-                    selected_card_index = clicked_card_index
-                if play_card_button.is_clicked(event.pos) and movement_mode and len(movement_preview_path) > 0:
-                    # In movement mode, the Play Card button confirms the chosen path.
-                    selected_character["row"] = movement_preview_row
-                    selected_character["col"] = movement_preview_col
+                if clicked_character_index is not None and not movement_mode:
+                    selected_character_index = clicked_character_index
+                    selected_character = get_selected_character(party, selected_character_index)
 
-                    player_grid_data[player_row][player_col]["unit"] = None
-                    player_grid_data[selected_character["row"]][selected_character["col"]]["unit"] = selected_character
+                    if selected_card_index is not None and current_turn == PLAYER_TURN:
+                        selected_card = player_hand[selected_card_index]
 
-                    player_row = selected_character["row"]
-                    player_col = selected_character["col"]
-
-                    movement_mode = False
-                    movement_card = None
-                    movement_preview_path = []
-
-                if play_card_button.is_clicked(event.pos) and selected_card_index is not None and current_turn == PLAYER_TURN and not movement_mode:
-                    selected_card = player_hand[selected_card_index]
-
-                    # play_card spends energy, runs the card effect, and reports special modes.
-                    card_was_played, current_energy, card_result = play_card(
-                        selected_card,
-                        selected_character,
-                        enemies,
-                        current_energy
-                    )
-
-                    if card_was_played:
-                        if card_result == "movement":
-                            # Movement cards are paid/discarded now, then resolved by preview.
+                        if selected_card["effect"] == "move":
+                            # Movement preview starts after choosing who will move, but costs nothing yet.
                             movement_mode = True
                             movement_card = selected_card
+                            movement_card_user = selected_character
                             movement_preview_row = selected_character["row"]
                             movement_preview_col = selected_character["col"]
                             movement_preview_path = []
                             movement_steps_left = selected_card["move_range"]
 
+                if clicked_card_index is not None and current_turn == PLAYER_TURN and not movement_mode:
+                    selected_card_index = clicked_card_index
+                if play_card_button.is_clicked(event.pos) and movement_mode and len(movement_preview_path) > 0 and selected_card_index is not None:
+                    # In movement mode, the Play Card button confirms and pays for the card.
+                    selected_card = player_hand[selected_card_index]
+                    card_was_played, current_energy, card_result = play_card(
+                        selected_card,
+                        movement_card_user,
+                        enemies,
+                        current_energy
+                    )
+
+                    if card_was_played:
+                        player_grid_data[movement_card_user["row"]][movement_card_user["col"]]["unit"] = None
+                        movement_card_user["row"] = movement_preview_row
+                        movement_card_user["col"] = movement_preview_col
+                        player_grid_data[movement_card_user["row"]][movement_card_user["col"]]["unit"] = movement_card_user
+
                         played_card = player_hand.pop(selected_card_index)
                         discard_pile.append(played_card)
                         selected_card_index = None
-                        if len(enemies) == 0:
-                            # Winning a battle clears warnings and opens rewards before the map.
-                            clear_incoming_attacks(player_grid_data)
-                            enemy_grid_data = create_grid_data()
-                            selected_card_index = None
-                            movement_mode = False
-                            movement_card = None
-                            movement_preview_path = []
-                            reward_mode = "choose_reward"
-                            selected_deck_card_index = None
-                            deck_scroll = 0
-                            current_state = REWARD
 
-                            if len(map_layers) == 0:
-                                # The tutorial battle is fixed; the run map begins after it.
-                                map_layers = generate_map()
-                                current_map_layer = 0
+                        movement_mode = False
+                        movement_card = None
+                        movement_card_user = None
+                        movement_preview_path = []
+
+                if play_card_button.is_clicked(event.pos) and selected_card_index is not None and current_turn == PLAYER_TURN and not movement_mode:
+                    selected_card = player_hand[selected_card_index]
+                    selected_character = get_selected_character(party, selected_character_index)
+
+                    if selected_card["effect"] == "move":
+                        # Movement cards enter preview first; energy is spent on confirmation.
+                        movement_mode = True
+                        movement_card = selected_card
+                        movement_card_user = selected_character
+                        movement_preview_row = selected_character["row"]
+                        movement_preview_col = selected_character["col"]
+                        movement_preview_path = []
+                        movement_steps_left = selected_card["move_range"]
+                    else:
+                        # play_card spends energy, runs the card effect, and reports special modes.
+                        card_was_played, current_energy, card_result = play_card(
+                            selected_card,
+                            selected_character,
+                            enemies,
+                            current_energy
+                        )
+
+                        if card_was_played:
+                            played_card = player_hand.pop(selected_card_index)
+                            discard_pile.append(played_card)
+                            selected_card_index = None
+                            if len(enemies) == 0:
+                                # Winning a battle clears warnings and opens rewards before the map.
+                                clear_incoming_attacks(player_grid_data)
+                                enemy_grid_data = create_grid_data()
+                                selected_card_index = None
+                                movement_mode = False
+                                movement_card = None
+                                movement_preview_path = []
+                                reward_mode = "choose_reward"
+                                selected_deck_card_index = None
+                                deck_scroll = 0
+                                current_state = REWARD
+
+                                if len(map_layers) == 0:
+                                    # The tutorial battle is fixed; the run map begins after it.
+                                    map_layers = generate_map()
+                                    current_map_layer = 0
 
 
                 if end_turn_button.is_clicked(event.pos) and current_turn == PLAYER_TURN and not movement_mode:
@@ -345,12 +489,8 @@ while running:
                                 enemy_grid_data = create_grid_data()
                                 enemies.clear()
 
-                                selected_character["row"] = selected_character["starting_row"]
-                                selected_character["col"] = selected_character["starting_col"]
-
-                                player_row = selected_character["row"]
-                                player_col = selected_character["col"]
-                                player_grid_data[player_row][player_col]["unit"] = selected_character
+                                place_party_on_grid(party, player_grid_data)
+                                selected_character = get_selected_character(party, selected_character_index)
 
                                 start_tutorial_battle(enemies, enemy_grid_data)
                                 choose_goblin_attack(player_grid_data)
@@ -358,6 +498,7 @@ while running:
                                 selected_card_index = None
                                 movement_mode = False
                                 movement_card = None
+                                movement_card_user = None
                                 movement_preview_path = []
                                 discard_pile.extend(player_hand)
                                 player_hand.clear()
@@ -375,10 +516,11 @@ while running:
 
                             if node["type"] == "rest":
                                 # Rest is a placeholder reward node: heal a little, then stay on map.
-                                selected_character["current_hp"] += 2
+                                for character in party:
+                                    character["current_hp"] += 2
 
-                                if selected_character["current_hp"] > selected_character["max_hp"]:
-                                    selected_character["current_hp"] = selected_character["max_hp"]
+                                    if character["current_hp"] > character["max_hp"]:
+                                        character["current_hp"] = character["max_hp"]
 
                             if node["type"] == "shop":
                                 print("Shop clicked")
@@ -423,8 +565,9 @@ while running:
             if current_state == GAME_OVER:
                 if play_again_button.is_clicked(event.pos):
                     # Reset board state, then return to character select for a fresh run.
-                    selected_character["current_hp"] = selected_character["max_hp"]
-
+                    party = []
+                    selected_character = None
+                    selected_character_index = 0
                     player_grid_data = create_grid_data()
                     enemy_grid_data = create_grid_data()
                     enemies.clear()
@@ -432,7 +575,9 @@ while running:
                     selected_card_index = None
                     movement_mode = False
                     movement_card = None
+                    movement_card_user = None
                     movement_preview_path = []
+                    map_layers = []
 
                     current_turn = PLAYER_TURN
                     current_state = CHARACTER_SELECT
@@ -448,7 +593,7 @@ while running:
         quit_button.draw(screen, font)
 
     if current_state == CHARACTER_SELECT:
-        # Character select is currently one-character only.
+        # Character select currently starts the fixed Archer + Warrior party.
         title_text = font.render("Character Select", True, WHITE)
         screen.blit(title_text, (430, 180))
         archer_button.draw(screen, font)
@@ -477,11 +622,12 @@ while running:
 
     if current_state == BATTLE or current_state == GAME_OVER:
         # Keep idle animations moving while battle or game-over overlay is visible.
+        max_character_idle_frames = max(len(character["idle_frames"]) for character in party)
         player_animation_timer, player_idle_frame_index = update_animation_frame(
             player_animation_timer,
             player_idle_frame_index,
             player_animation_speed,
-            len(player_idle_frames)
+            max_character_idle_frames
         )
 
         satyr_animation_timer, satyr_idle_frame_index = update_animation_frame(
@@ -504,9 +650,7 @@ while running:
                     satyr_attack_frame_index = 0
 
                     next_state, next_turn = finish_enemy_attack(
-                        selected_character,
-                        player_row,
-                        player_col,
+                        party,
                         player_grid_data,
                         enemy_grid_data,
                         enemies
@@ -522,8 +666,6 @@ while running:
 
     if current_state == BATTLE or current_state == GAME_OVER:
         # Draw the battle underneath game-over so the loss still has context.
-        player_image = player_idle_frames[player_idle_frame_index]
-
         if enemy_is_attacking:
             satyr_image = satyr_attack_frames[satyr_attack_frame_index]
         else:
@@ -539,6 +681,7 @@ while running:
             # If the selected card was removed, clear the old hand index.
             selected_card_index = None
 
+        selected_character = get_selected_character(party, selected_character_index)
         enemy_preview_tiles = get_card_preview_tiles(selected_card, selected_character)
 
         player_preview_tiles = []
@@ -551,20 +694,19 @@ while running:
             font,
             end_turn_button,
             play_card_button,
+            party,
             selected_character,
             current_energy,
-            player_row,
-            player_col,
             player_grid_data,
             enemies,
-            player_image,
+            player_idle_frame_index,
             satyr_image,
             player_preview_tiles,
             enemy_preview_tiles
         )
 
         mouse_pos = pygame.mouse.get_pos()
-        draw_card_hand(screen, player_hand, mouse_pos, selected_card_index)
+        draw_card_hand(screen, player_hand, mouse_pos, selected_card_index, selected_character, small_font)
 
         if movement_mode:
             confirm_text = font.render("Choose movement, then press E or Play Card", True, WHITE)

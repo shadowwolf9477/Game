@@ -27,8 +27,8 @@ GRID_Y = 260
 
 BATTLE_TITLE_X = 540
 BATTLE_TITLE_Y = 60
-HP_X = 90
-HP_Y = 180
+HP_X = 20
+HP_Y = 20
 
 # Card hand layout along the bottom of the battle screen.
 HAND_X = 80

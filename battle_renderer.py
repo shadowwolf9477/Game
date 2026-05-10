@@ -1,3 +1,5 @@
+import pygame
+
 from settings import (
     WHITE,
     GRID_SIZE,
@@ -18,13 +20,12 @@ def draw_battle(
     font,
     end_turn_button,
     play_card_button,
+    party,
     selected_character,
     current_energy,
-    player_row,
-    player_col,
     player_grid_data,
     enemies,
-    player_image,
+    player_idle_frame_index,
     satyr_image,
     player_preview_tiles,
     enemy_preview_tiles
@@ -36,30 +37,44 @@ def draw_battle(
     end_turn_button.draw(screen, font)
     play_card_button.draw(screen, font)
 
-    hp_text = font.render(
-        "HP: " + str(selected_character["current_hp"]) + "/" + str(selected_character["max_hp"]),
-        True,
-        WHITE
-    )
-    screen.blit(hp_text, (HP_X, HP_Y))
+    for index, character in enumerate(party):
+        hp_text = font.render(
+            character["name"] + " HP: " + str(character["current_hp"]) + "/" + str(character["max_hp"]),
+            True,
+            WHITE
+        )
+        screen.blit(hp_text, (HP_X, HP_Y + index * 34))
 
     energy_text = font.render("Energy: " + str(current_energy), True, WHITE)
-    screen.blit(energy_text, (HP_X, HP_Y + 50))
+    screen.blit(energy_text, (HP_X, HP_Y + 75))
 
     # Player side uses real grid_data because it needs attack warnings.
+    selected_row = None
+    selected_col = None
+
+    if selected_character is not None:
+        selected_row = selected_character["row"]
+        selected_col = selected_character["col"]
+
     draw_grid(
         screen,
         PLAYER_GRID_X,
         GRID_Y,
-        player_row,
-        player_col,
+        selected_row,
+        selected_col,
         player_grid_data,
         player_preview_tiles
     )
 
-    player_x = PLAYER_GRID_X + player_col * (GRID_SIZE + GRID_GAP)
-    player_y = GRID_Y + player_row * (GRID_SIZE + GRID_GAP)
-    screen.blit(player_image, (player_x, player_y))
+    for character in party:
+        player_x = PLAYER_GRID_X + character["col"] * (GRID_SIZE + GRID_GAP)
+        player_y = GRID_Y + character["row"] * (GRID_SIZE + GRID_GAP)
+        player_image = character["idle_frames"][player_idle_frame_index % len(character["idle_frames"])]
+
+        if character.get("flip_x"):
+            player_image = pygame.transform.flip(player_image, True, False)
+
+        screen.blit(player_image, (player_x, player_y))
 
     # Enemy side currently renders the first enemy only.
     # This will need a loop when multi-enemy battles are added.

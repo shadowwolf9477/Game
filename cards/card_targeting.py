@@ -1,9 +1,9 @@
-from settings import GRID_COLS
+from settings import GRID_ROWS, GRID_COLS
 
 
 def get_card_preview_tiles(card, selected_character):
     # Return enemy-board preview tiles for the selected attack card.
-    if card is None:
+    if card is None or selected_character is None:
         return []
 
     if card["effect"] == "pierce_row":
@@ -16,17 +16,37 @@ def get_card_preview_tiles(card, selected_character):
 
         return preview_tiles
 
-    if card["effect"] == "bow_shot":
-        # Bow Shot previews columns starting from the player's matching enemy column.
+    if card["effect"] == "basic_attack":
         player_row = selected_character["row"]
         player_col = selected_character["col"]
         preview_tiles = []
 
-        for distance in range(card["range"]):
-            enemy_col = player_col + distance
+        if selected_character["basic_attack_shape"] == "vertical_slash":
+            preview_rows = [player_row]
 
-            if enemy_col < GRID_COLS:
-                preview_tiles.append((player_row, enemy_col))
+            if player_row + 1 < GRID_ROWS:
+                preview_rows.append(player_row + 1)
+            elif player_row - 1 >= 0:
+                preview_rows.append(player_row - 1)
+
+            for row in preview_rows:
+                preview_tiles.append((row, player_col))
+        else:
+            # Archer previews columns starting from the matching enemy column.
+            for distance in range(card["range"]):
+                enemy_col = player_col + distance
+
+                if enemy_col < GRID_COLS:
+                    preview_tiles.append((player_row, enemy_col))
+
+        return preview_tiles
+
+    if card["effect"] == "cleave_column":
+        player_col = selected_character["col"]
+        preview_tiles = []
+
+        for row in range(GRID_ROWS):
+            preview_tiles.append((row, player_col))
 
         return preview_tiles
 

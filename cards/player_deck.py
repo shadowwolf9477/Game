@@ -2,15 +2,33 @@ import random
 from cards.card_library import CARD_LIBRARY
 
 
-def build_starting_deck(character):
-    # Turn starting deck IDs into separate card copies for this run.
+NEUTRAL_STARTING_CARDS = [
+    "quick_step",
+    "quick_step",
+    "quick_step",
+    "quick_step",
+    "basic_attack",
+    "basic_attack",
+    "basic_attack",
+    "basic_attack"
+]
+
+
+def build_card(card_id):
+    # copy() matters: sleeves should change one card, not every library copy.
+    return CARD_LIBRARY[card_id].copy()
+
+
+def build_starting_deck(party):
+    # Build one shared deck from neutral cards plus each character's specific cards.
     deck = []
 
-    for card_id in character["starting_deck"]:
-        # copy() matters: sleeves should change one card, not every library copy.
-        card = CARD_LIBRARY[card_id].copy()
+    for card_id in NEUTRAL_STARTING_CARDS:
+        deck.append(build_card(card_id))
 
-        deck.append(card)
+    for character in party:
+        for card_id in character["specific_cards"]:
+            deck.append(build_card(card_id))
 
     return deck
 
