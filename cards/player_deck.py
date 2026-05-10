@@ -20,10 +20,16 @@ def shuffle_deck(deck):
     return shuffled_deck
 
 
-def draw_cards(draw_pile, hand, amount):
+def draw_cards(draw_pile, discard_pile, hand, amount):
     # Move cards from draw_pile into hand.
-    # Later this will reshuffle discard_pile if draw_pile runs out.
+    # If the draw pile runs out, reshuffle the discard pile into a new draw pile.
     for draw_count in range(amount):
-        if len(draw_pile) > 0:
-            card = draw_pile.pop(0)
-            hand.append(card)
+        if len(draw_pile) == 0 and len(discard_pile) > 0:
+            draw_pile.extend(shuffle_deck(discard_pile))
+            discard_pile.clear()
+
+        if len(draw_pile) == 0:
+            return
+
+        card = draw_pile.pop(0)
+        hand.append(card)

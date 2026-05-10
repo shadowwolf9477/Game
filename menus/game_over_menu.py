@@ -1,15 +1,29 @@
 import pygame
-from settings import WHITE
+from settings import (
+    WHITE,
+    GAME_OVER_POPUP_X,
+    GAME_OVER_POPUP_Y,
+    GAME_OVER_POPUP_WIDTH,
+    GAME_OVER_POPUP_HEIGHT,
+    GAME_OVER_TEXT_X,
+    GAME_OVER_TEXT_Y
+)
 
 
 def draw_game_over_menu(screen, font, play_again_button, quit_button):
-    # Draws a popup over the battle screen when the player dies.
-    popup_rect = pygame.Rect(220, 180, 360, 220)
+    # Draw a centered popup over the battle screen.
+    popup_rect = pygame.Rect(
+        GAME_OVER_POPUP_X,
+        GAME_OVER_POPUP_Y,
+        GAME_OVER_POPUP_WIDTH,
+        GAME_OVER_POPUP_HEIGHT
+    )
+
     pygame.draw.rect(screen, (30, 30, 40), popup_rect)
     pygame.draw.rect(screen, WHITE, popup_rect, 2)
 
     game_over_text = font.render("Game Over", True, WHITE)
-    screen.blit(game_over_text, (300, 220))
+    screen.blit(game_over_text, (GAME_OVER_TEXT_X, GAME_OVER_TEXT_Y))
 
     play_again_button.draw(screen, font)
     quit_button.draw(screen, font)

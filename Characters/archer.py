@@ -12,10 +12,10 @@ archer = {
         "quick_step",
         "quick_step",
         "quick_step",
-        "quick_step",
-        "pierce_shot",
-        "pierce_shot",
-        "pierce_shot",
+        "bow_shot",
+        "bow_shot",
+        "bow_shot",
+        "bow_shot",
         "pierce_shot",
         "pierce_shot"
     ]
