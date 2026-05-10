@@ -29,7 +29,7 @@ def draw_battle(
     player_preview_tiles,
     enemy_preview_tiles
 ):
-    # Draw the basic battle UI.
+    # Draw battle title, controls, and player resources.
     battle_text = font.render("Battle", True, WHITE)
     screen.blit(battle_text, (BATTLE_TITLE_X, BATTLE_TITLE_Y))
 
@@ -46,7 +46,7 @@ def draw_battle(
     energy_text = font.render("Energy: " + str(current_energy), True, WHITE)
     screen.blit(energy_text, (HP_X, HP_Y + 50))
 
-    # Player side grid, movement-card preview, and player sprite.
+    # Player side uses real grid_data because it needs attack warnings.
     draw_grid(
         screen,
         PLAYER_GRID_X,
@@ -61,7 +61,8 @@ def draw_battle(
     player_y = GRID_Y + player_row * (GRID_SIZE + GRID_GAP)
     screen.blit(player_image, (player_x, player_y))
 
-    # Enemy side grid, attack-card preview, and first enemy sprite.
+    # Enemy side currently renders the first enemy only.
+    # This will need a loop when multi-enemy battles are added.
     if enemies:
         first_enemy = enemies[0]
 

@@ -4,7 +4,7 @@ from movement import move_unit
 
 
 def start_tutorial_battle(enemies, enemy_grid_data):
-    # First battle always starts with one goblin/satyr in the center.
+    # The tutorial fight is fixed so new runs start with a predictable test battle.
     enemies.clear()
 
     goblin = {
@@ -14,11 +14,12 @@ def start_tutorial_battle(enemies, enemy_grid_data):
     }
 
     enemies.append(goblin)
+    # Store the same enemy object on the grid so movement/rendering can find it.
     enemy_grid_data[goblin["row"]][goblin["col"]]["unit"] = goblin
 
 
 def choose_goblin_attack(player_grid_data):
-    # Pick 2 random player-side tiles and mark them as incoming attacks.
+    # The current goblin pattern warns two random player tiles before damage.
     all_tiles = []
 
     for row in range(GRID_ROWS):
@@ -28,20 +29,21 @@ def choose_goblin_attack(player_grid_data):
     chosen_tiles = random.sample(all_tiles, 2)
 
     for row, col in chosen_tiles:
+        # Battle resolution reads this later to decide if the player gets hit.
         player_grid_data[row][col]["incoming_attack"] = {
             "damage": 1
         }
 
 
 def clear_incoming_attacks(player_grid_data):
-    # Remove all orange warning tiles after the enemy attack resolves.
+    # Clear warning tiles after attacks resolve or when battle is won.
     for row in range(GRID_ROWS):
         for col in range(GRID_COLS):
             player_grid_data[row][col]["incoming_attack"] = None
 
 
 def resolve_incoming_attacks(player, player_row, player_col, player_grid_data):
-    # If the player is standing on an attack tile, they take that tile's damage.
+    # Only the tile the player currently occupies can hurt them right now.
     current_tile = player_grid_data[player_row][player_col]
     incoming_attack = current_tile["incoming_attack"]
 
@@ -50,7 +52,7 @@ def resolve_incoming_attacks(player, player_row, player_col, player_grid_data):
 
 
 def move_enemy_random(enemy, enemy_grid_data):
-    # Move one enemy like a pawn: one tile left, right, up, or down.
+    # Placeholder enemy movement until each enemy type gets its own behavior.
     direction = random.choice(["left", "right", "up", "down"])
 
     if direction == "left":

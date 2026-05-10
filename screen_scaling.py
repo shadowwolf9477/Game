@@ -2,7 +2,7 @@ from settings import SCREEN_WIDTH, SCREEN_HEIGHT
 
 
 def scale_mouse_pos(mouse_pos, window_size):
-    # Convert mouse position from real window pixels to internal game pixels.
+    # Convert real window pixels to the fixed 1200x800 game coordinate space.
     mouse_x, mouse_y = mouse_pos
     window_width, window_height = window_size
 

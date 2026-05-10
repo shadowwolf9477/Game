@@ -11,7 +11,7 @@ from settings import (
 
 
 def draw_game_over_menu(screen, font, play_again_button, quit_button):
-    # Draw a centered popup over the battle screen.
+    # Draw a centered popup over the frozen battle screen.
     popup_rect = pygame.Rect(
         GAME_OVER_POPUP_X,
         GAME_OVER_POPUP_Y,
@@ -25,5 +25,6 @@ def draw_game_over_menu(screen, font, play_again_button, quit_button):
     game_over_text = font.render("Game Over", True, WHITE)
     screen.blit(game_over_text, (GAME_OVER_TEXT_X, GAME_OVER_TEXT_Y))
 
+    # Reuse normal Button objects so menu click handling stays simple.
     play_again_button.draw(screen, font)
     quit_button.draw(screen, font)

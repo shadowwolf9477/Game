@@ -2,12 +2,12 @@ import pygame
 from settings import HAND_X, HAND_Y, CARD_WIDTH, CARD_HEIGHT, CARD_GAP, BLUE
 
 
-# Stores already-loaded/scaled card images so huge PNGs are not loaded every frame.
+# Stores loaded/scaled card images so card art is not reloaded every frame.
 CARD_IMAGE_CACHE = {}
 
 
 def get_card_image(image_path, size):
-    # Load and scale a card image once, then reuse it.
+    # Cache key includes size because the hand and hover preview use different scales.
     cache_key = (image_path, size)
 
     if cache_key not in CARD_IMAGE_CACHE:
@@ -19,7 +19,7 @@ def get_card_image(image_path, size):
 
 
 def get_clicked_card_index(hand, mouse_pos):
-    # Return the exact hand slot clicked, not just the card data.
+    # Return the hand slot index so main.py can remove/discard the exact card.
     for index, card in enumerate(hand):
         x = HAND_X + index * (CARD_WIDTH + CARD_GAP)
         card_rect = pygame.Rect(x, HAND_Y, CARD_WIDTH, CARD_HEIGHT)
@@ -31,7 +31,7 @@ def get_clicked_card_index(hand, mouse_pos):
 
 
 def draw_card_hand(screen, hand, mouse_pos, selected_card_index):
-    # Draw small card images at the bottom of the screen.
+    # Draw the current hand and track one hovered card for a larger preview.
     hovered_card = None
 
     for index, card in enumerate(hand):
@@ -42,6 +42,7 @@ def draw_card_hand(screen, hand, mouse_pos, selected_card_index):
         screen.blit(card_image, (x, HAND_Y))
 
         if index == selected_card_index:
+            # Blue border marks the card that will be played if Play Card is clicked.
             pygame.draw.rect(screen, BLUE, card_rect, 4)
 
         if card_rect.collidepoint(mouse_pos):
