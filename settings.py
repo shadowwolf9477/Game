@@ -1,6 +1,6 @@
 # Window settings.
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
+SCREEN_WIDTH = 1200
+SCREEN_HEIGHT = 800
 FPS = 60
 
 # Colors.
@@ -15,5 +15,22 @@ TITLE = "Roguelike Game"
 # Battle grid settings.
 GRID_ROWS = 3
 GRID_COLS = 5
-GRID_SIZE = 60
-GRID_GAP = 6
+GRID_SIZE = 85
+GRID_GAP = 8
+
+# Battle layout.
+PLAYER_GRID_X = 90
+ENEMY_GRID_X = 650
+GRID_Y = 260
+
+BATTLE_TITLE_X = 540
+BATTLE_TITLE_Y = 60
+HP_X = 90
+HP_Y = 180
+
+# Card hand layout.
+HAND_X = 80
+HAND_Y = 590
+CARD_WIDTH = 130
+CARD_HEIGHT = 182
+CARD_GAP = 18

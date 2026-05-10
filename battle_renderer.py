@@ -1,4 +1,15 @@
-from settings import WHITE, GRID_SIZE, GRID_GAP
+from settings import (
+    WHITE,
+    GRID_SIZE,
+    GRID_GAP,
+    PLAYER_GRID_X,
+    ENEMY_GRID_X,
+    GRID_Y,
+    BATTLE_TITLE_X,
+    BATTLE_TITLE_Y,
+    HP_X,
+    HP_Y
+)
 from battle_grid import draw_grid
 
 
@@ -16,7 +27,7 @@ def draw_battle(
 ):
     # Draw the basic battle UI.
     battle_text = font.render("Battle", True, WHITE)
-    screen.blit(battle_text, (340, 100))
+    screen.blit(battle_text, (BATTLE_TITLE_X, BATTLE_TITLE_Y))
 
     end_turn_button.draw(screen, font)
 
@@ -25,22 +36,22 @@ def draw_battle(
         True,
         WHITE
     )
-    screen.blit(hp_text, (60, 160))
+    screen.blit(hp_text, (HP_X, HP_Y))
 
     # Player side grid and player sprite.
-    draw_grid(screen, 60, 220, player_row, player_col, player_grid_data)
+    draw_grid(screen, PLAYER_GRID_X, GRID_Y, player_row, player_col, player_grid_data)
 
-    player_x = 60 + player_col * (GRID_SIZE + GRID_GAP)
-    player_y = 220 + player_row * (GRID_SIZE + GRID_GAP)
+    player_x = PLAYER_GRID_X + player_col * (GRID_SIZE + GRID_GAP)
+    player_y = GRID_Y + player_row * (GRID_SIZE + GRID_GAP)
     screen.blit(player_image, (player_x, player_y))
 
     # Enemy side grid and first enemy sprite.
     if enemies:
         first_enemy = enemies[0]
-        draw_grid(screen, 420, 220, first_enemy["row"], first_enemy["col"])
+        draw_grid(screen, ENEMY_GRID_X, GRID_Y, first_enemy["row"], first_enemy["col"])
 
-        enemy_x = 420 + first_enemy["col"] * (GRID_SIZE + GRID_GAP)
-        enemy_y = 220 + first_enemy["row"] * (GRID_SIZE + GRID_GAP)
+        enemy_x = ENEMY_GRID_X + first_enemy["col"] * (GRID_SIZE + GRID_GAP)
+        enemy_y = GRID_Y + first_enemy["row"] * (GRID_SIZE + GRID_GAP)
         screen.blit(satyr_image, (enemy_x, enemy_y))
     else:
-        draw_grid(screen, 420, 220)
+        draw_grid(screen, ENEMY_GRID_X, GRID_Y)

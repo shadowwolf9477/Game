@@ -12,6 +12,8 @@ from menus.game_over_menu import draw_game_over_menu
 from battle_renderer import draw_battle
 from animation_state import update_animation_frame
 from battle_turn_logic import finish_enemy_attack
+from cards.card_renderer import draw_card_hand
+from cards.player_deck import build_starting_deck, shuffle_deck, draw_cards
 
 from Characters.archer import archer
 
@@ -27,19 +29,16 @@ font = pygame.font.Font(None, 50)
 
 
 # Buttons are created once, then drawn/checked depending on the current screen.
-# Main menu buttons.
-start_button = Button(300, 170, 200, 60, "Start")
-quit_button = Button(300, 250, 200, 60, "Quit")
+start_button = Button(500, 220, 220, 70, "Start")
+quit_button = Button(500, 310, 220, 70, "Quit")
 
-# Character select buttons.
-archer_button = Button(300, 250, 200, 60, "Archer")
+archer_button = Button(500, 330, 220, 70, "Archer")
 
-# Battle buttons.
-end_turn_button = Button(450, 30, 200, 60, "End turn")
+end_turn_button = Button(870, 60, 220, 70, "End turn")
 
-# Game over overlay buttons.
-play_again_button = Button(230, 300, 180, 60, "Play Again")
-game_over_quit_button = Button(410, 300, 140, 60, "Quit")
+play_again_button = Button(410, 390, 220, 70, "Play Again")
+game_over_quit_button = Button(650, 390, 160, 70, "Quit")
+
 
 
 # Battle state data.
@@ -48,6 +47,14 @@ game_over_quit_button = Button(410, 300, 140, 60, "Quit")
 player_row = 1
 player_col = 2
 selected_character = ""
+#cards 
+player_deck = []
+player_hand = []
+draw_pile = []
+discard_pile = []
+
+
+
 
 current_turn = PLAYER_TURN
 
@@ -85,11 +92,17 @@ current_state = HOME_MENU
 running = True
 while running:
     # Input section: read keyboard, mouse, and quit events.
+
+
     for event in pygame.event.get():
+        
         if event.type == pygame.QUIT:
             running = False
 
+
         if event.type == pygame.KEYDOWN:
+            
+
             # Temporary debug movement.
             # Later, cards will call movement.py instead of arrow keys.
             if current_state == BATTLE and current_turn == PLAYER_TURN:
@@ -109,6 +122,8 @@ while running:
                 player_col = selected_character["col"]
 
         if event.type == pygame.MOUSEBUTTONDOWN:
+        
+
             # Main menu input.
             if current_state == HOME_MENU:
                 if quit_button.is_clicked(event.pos):
@@ -127,8 +142,14 @@ while running:
                     player_row = selected_character["row"]
                     player_col = selected_character["col"]
                     player_grid_data[player_row][player_col]["unit"] = selected_character
-
+                    player_deck = build_starting_deck(selected_character)
+                    draw_pile = shuffle_deck(player_deck)
+                    player_hand = []
+                    discard_pile = []
+                    draw_cards(draw_pile, player_hand, 5)
                     current_state = BATTLE
+
+
 
                     # battle_setup.py creates the tutorial enemy and first warning tiles.
                     start_tutorial_battle(enemies, enemy_grid_data)
@@ -242,13 +263,21 @@ while running:
             player_image,
             satyr_image
         )
+        mouse_pos = pygame.mouse.get_pos()
+        draw_card_hand(screen, player_hand, mouse_pos)
+
+
+
 
         # menus/game_over_menu.py draws a popup over the battle.
         if current_state == GAME_OVER:
             draw_game_over_menu(screen, font, play_again_button, game_over_quit_button)
 
+
+
     pygame.display.flip()
     clock.tick(FPS)
+
 
 
 pygame.quit()
