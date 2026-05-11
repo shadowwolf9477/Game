@@ -22,6 +22,7 @@ from battle_setup import (
     prepare_enemy_attacks,
     clear_incoming_attacks,
     clear_enemy_incoming_attacks,
+    clear_dead_enemy_incoming_attacks,
     resolve_enemy_incoming_attacks,
     sync_enemy_grid
 )
@@ -334,6 +335,7 @@ while running:
                             )
 
                             if card_was_played:
+                                clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
                                 sync_enemy_grid(enemies, enemy_grid_data)
                                 played_card = player_hand.pop(selected_card_index)
                                 discard_pile.append(played_card)
@@ -531,6 +533,7 @@ while running:
                         )
 
                         if card_was_played:
+                            clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
                             sync_enemy_grid(enemies, enemy_grid_data)
                             played_card = player_hand.pop(selected_card_index)
                             discard_pile.append(played_card)

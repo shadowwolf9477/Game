@@ -55,8 +55,8 @@ def get_energy_bar_image(image_path):
 
 def draw_energy_bar(screen, current_energy, max_energy, x, y):
     # Draw an empty bar, then clip the filled bar to match current energy.
-    empty_bar = get_energy_bar_image("assests/UI BARS/empty_bar.png")
-    filled_bar = get_energy_bar_image("assests/UI BARS/energy_bar.png")
+    empty_bar = get_energy_bar_image("assets/UI_BARS/empty_bar.png")
+    filled_bar = get_energy_bar_image("assets/UI_BARS/energy_bar.png")
 
     screen.blit(empty_bar, (x, y))
 

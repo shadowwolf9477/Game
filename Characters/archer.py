@@ -10,7 +10,7 @@ archer = {
     "tags": ["ranged"],
     "basic_attack_shape": "row_shot",
     "idle_animation": {
-        "sheet_path": "assests/Eris Esra's Character Template 4.1/16x32/16x32 Idle-Sheet.png",
+        "sheet_path": "assets/Eris Esra's Character Template 4.1/16x32/16x32 Idle-Sheet.png",
         "frame_width": 32,
         "frame_height": 32,
         "row": 1,

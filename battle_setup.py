@@ -143,6 +143,21 @@ def clear_enemy_incoming_attacks(enemy, player_grid_data):
                 player_grid_data[row][col]["incoming_attack"] = None
 
 
+def clear_dead_enemy_incoming_attacks(enemies, player_grid_data):
+    for row in range(GRID_ROWS):
+        for col in range(GRID_COLS):
+            incoming_attack = player_grid_data[row][col]["incoming_attack"]
+
+            if incoming_attack is None:
+                continue
+
+            source_enemy = incoming_attack.get("source")
+            source_is_alive = any(source_enemy is enemy for enemy in enemies)
+
+            if not source_is_alive:
+                player_grid_data[row][col]["incoming_attack"] = None
+
+
 def resolve_incoming_attacks(player, player_row, player_col, player_grid_data):
     if player["current_hp"] <= 0:
         return
