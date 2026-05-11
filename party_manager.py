@@ -2,6 +2,7 @@ import pygame
 
 from settings import PLAYER_GRID_X, GRID_Y, GRID_SIZE, GRID_GAP
 from loaders.battle_assets import load_character_idle_frames
+from loaders.animation_loader import make_flipped_frames
 from cards.card_effects import character_can_use_card
 from Characters.archer import archer
 from Characters.warrior import warrior
@@ -14,6 +15,8 @@ def make_party():
 
     archer_character["idle_frames"] = load_character_idle_frames(archer_character)
     warrior_character["idle_frames"] = load_character_idle_frames(warrior_character)
+    archer_character["idle_frames_flipped"] = make_flipped_frames(archer_character["idle_frames"])
+    warrior_character["idle_frames_flipped"] = make_flipped_frames(warrior_character["idle_frames"])
 
     return [archer_character, warrior_character]
 

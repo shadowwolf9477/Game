@@ -8,8 +8,9 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 DARK_BG = (20, 20, 30)
 RED = (255, 0, 0)
-ORANGE = (255, 140, 0)
 BLUE = (0, 180, 255)
+SLEEVE_BLUE = (85, 190, 255)
+ATTACK_WARNING = (255, 55, 95)
 
 
 TITLE = "Roguelike Game"

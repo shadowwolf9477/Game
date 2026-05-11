@@ -1,5 +1,5 @@
 import pygame
-from settings import GRID_ROWS, GRID_COLS, GRID_SIZE, GRID_GAP, WHITE, RED, ORANGE, BLUE
+from settings import GRID_ROWS, GRID_COLS, GRID_SIZE, GRID_GAP, WHITE, RED, ATTACK_WARNING, BLUE
 
 
 def draw_grid(screen, start_x, start_y, selected_row=None, selected_col=None, grid_data=None, preview_tiles=None):
@@ -22,7 +22,7 @@ def draw_grid(screen, start_x, start_y, selected_row=None, selected_col=None, gr
             if tile_has_preview:
                 pygame.draw.rect(screen, BLUE, square, 3)
             elif tile_has_attack:
-                pygame.draw.rect(screen, ORANGE, square, 2)
+                pygame.draw.rect(screen, ATTACK_WARNING, square, 4)
             elif row == selected_row and col == selected_col:
                 pygame.draw.rect(screen, RED, square, 2)
             else:

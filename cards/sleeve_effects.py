@@ -3,6 +3,7 @@ def apply_premium_sleeve(card):
     card["damage"] += 1
     card["cost"] += 1
     card["thickness"] += 0.5
+    card.setdefault("sleeves", []).append("Premium Sleeve")
 
 
 # Maps sleeve effect IDs from card_sleeves.py to the function that applies them.

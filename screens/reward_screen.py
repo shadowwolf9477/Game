@@ -1,11 +1,11 @@
 import pygame
 
-from settings import WHITE
+from settings import SLEEVE_BLUE, WHITE
 from cards.card_effects import get_card_display_name
+from cards.card_renderer import card_has_sleeve, draw_sleeve_outline, get_card_image
 
 
-def draw_reward_screen(screen, font, small_font, reward_mode, player_deck, deck_scroll, selected_sleeve, can_apply_sleeve):
-    # Reward popup sits on its own screen between combat victory and the map.
+def draw_reward_screen(screen, font, small_font, reward_mode, card_reward_choices, player_deck, deck_scroll_y, selected_sleeve, can_apply_sleeve):
     popup_rect = pygame.Rect(60, 90, 1080, 660)
     pygame.draw.rect(screen, (30, 30, 40), popup_rect)
     pygame.draw.rect(screen, WHITE, popup_rect, 2)
@@ -20,35 +20,82 @@ def draw_reward_screen(screen, font, small_font, reward_mode, player_deck, deck_
         pygame.draw.rect(screen, WHITE, new_card_rect, 2)
         pygame.draw.rect(screen, WHITE, sleeve_rect, 2)
 
-        new_card_text = font.render("New Card", True, WHITE)
-        sleeve_text = font.render("Sleeve", True, WHITE)
+        screen.blit(font.render("New Card", True, WHITE), (410, 330))
+        screen.blit(font.render("Sleeve", True, WHITE), (665, 330))
+    if reward_mode == "choose_new_card":
+        info_text = font.render("Choose a card", True, WHITE)
+        screen.blit(info_text, (450, 175))
+        for index, card in enumerate(card_reward_choices):
+            card_x, card_y, card_rect = get_card_reward_rect(index)
+            if "image_path" in card:
+                card_image = get_card_image(card["image_path"], (170, 220))
+                screen.blit(card_image, (card_x, card_y))
+            else:
+                pygame.draw.rect(screen, (45, 45, 60), card_rect)
 
-        screen.blit(new_card_text, (410, 330))
-        screen.blit(sleeve_text, (665, 330))
+                name_text = small_font.render(get_card_display_name(card, None), True, WHITE)
+                screen.blit(name_text, (card_x + 8, card_y + 10))
+
+                cost_text = small_font.render("Cost " + str(card["cost"]), True, WHITE)
+                screen.blit(cost_text, (card_x + 8, card_y + 45))
+
+                rarity_text = small_font.render(card["rarity"], True, WHITE)
+                screen.blit(rarity_text, (card_x + 8, card_y + 80))
+
+                if "damage" in card:
+                    damage_text = small_font.render("Dmg " + str(card["damage"]), True, WHITE)
+                    screen.blit(damage_text, (card_x + 8, card_y + 115))
+
+            pygame.draw.rect(screen, WHITE, card_rect, 3)
+
+
+
+
 
     if reward_mode == "choose_sleeve_card":
-        info_text = font.render("Choose attack card", True, WHITE)
-        screen.blit(info_text, (420, 175))
+        info_text = font.render("Choose a card to sleeve", True, WHITE)
+        screen.blit(info_text, (380, 175))
 
-        visible_cards = player_deck[deck_scroll:deck_scroll + 8]
+        hint_text = small_font.render("Mouse wheel to scroll. Click a white card to upgrade it.", True, WHITE)
+        screen.blit(hint_text, (330, 215))
 
-        for index, card in enumerate(visible_cards):
-            card_x, card_y, card_rect = get_reward_card_rect(index)
+        for index, card in enumerate(player_deck):
+            card_x, card_y, card_rect = get_reward_card_rect(index, deck_scroll_y)
 
-            if can_apply_sleeve(selected_sleeve, card):
-                pygame.draw.rect(screen, WHITE, card_rect, 2)
+            if card_y < 230 or card_y > 690:
+                continue
+
+            valid = can_apply_sleeve(selected_sleeve, card)
+
+            if "image_path" in card:
+                card_image = get_card_image(card["image_path"], (150, 180))
+                screen.blit(card_image, (card_x, card_y))
             else:
-                pygame.draw.rect(screen, (90, 90, 90), card_rect, 2)
+                pygame.draw.rect(screen, (45, 45, 60), card_rect)
 
-            name_text = small_font.render(get_card_display_name(card, None), True, WHITE)
-            screen.blit(name_text, (card_x, card_y + 20))
+            if valid:
+                pygame.draw.rect(screen, WHITE, card_rect, 3)
+            else:
+                pygame.draw.rect(screen, (90, 90, 90), card_rect, 3)
 
-            cost_text = small_font.render("Cost " + str(card["cost"]), True, WHITE)
-            screen.blit(cost_text, (card_x, card_y + 70))
+            if card_has_sleeve(card):
+                draw_sleeve_outline(screen, card_rect)
+                sleeve_text = small_font.render("Sleeved", True, SLEEVE_BLUE)
+                screen.blit(sleeve_text, (card_x + 8, card_y + 145))
 
-            if "damage" in card:
-                damage_text = small_font.render("Dmg " + str(card["damage"]), True, WHITE)
-                screen.blit(damage_text, (card_x, card_y + 115))
+            if "image_path" not in card:
+                name_text = small_font.render(get_card_display_name(card, None), True, WHITE)
+                screen.blit(name_text, (card_x + 8, card_y + 10))
+
+                cost_text = small_font.render("Cost " + str(card["cost"]), True, WHITE)
+                screen.blit(cost_text, (card_x + 8, card_y + 45))
+
+                thick_text = small_font.render("Thick " + str(card["thickness"]), True, WHITE)
+                screen.blit(thick_text, (card_x + 8, card_y + 80))
+
+                if "damage" in card:
+                    damage_text = small_font.render("Dmg " + str(card["damage"]), True, WHITE)
+                    screen.blit(damage_text, (card_x + 8, card_y + 115))
 
 
 def get_reward_choice_click(mouse_pos):
@@ -64,11 +111,12 @@ def get_reward_choice_click(mouse_pos):
     return None
 
 
-def get_clicked_reward_deck_card(player_deck, deck_scroll, mouse_pos):
-    visible_cards = player_deck[deck_scroll:deck_scroll + 8]
+def get_clicked_reward_deck_card(player_deck, deck_scroll_y, mouse_pos):
+    for index, card in enumerate(player_deck):
+        card_x, card_y, card_rect = get_reward_card_rect(index, deck_scroll_y)
 
-    for index, card in enumerate(visible_cards):
-        card_x, card_y, card_rect = get_reward_card_rect(index)
+        if card_y < 230 or card_y > 690:
+            continue
 
         if card_rect.collidepoint(mouse_pos):
             return card
@@ -76,9 +124,26 @@ def get_clicked_reward_deck_card(player_deck, deck_scroll, mouse_pos):
     return None
 
 
-def get_reward_card_rect(index):
+def get_clicked_card_reward(card_reward_choices, mouse_pos):
+    for index, card in enumerate(card_reward_choices):
+        card_x, card_y, card_rect = get_card_reward_rect(index)
+
+        if card_rect.collidepoint(mouse_pos):
+            return card
+
+    return None
+
+
+def get_reward_card_rect(index, deck_scroll_y):
     card_x = 150 + (index % 4) * 235
-    card_y = 250 + (index // 4) * 220
+    card_y = 250 + (index // 4) * 220 - deck_scroll_y
     card_rect = pygame.Rect(card_x, card_y, 150, 180)
+
+    return card_x, card_y, card_rect
+
+def get_card_reward_rect(index):
+    card_x = 270 + index * 230
+    card_y = 280
+    card_rect = pygame.Rect(card_x, card_y, 170, 220)
 
     return card_x, card_y, card_rect

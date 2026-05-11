@@ -6,6 +6,7 @@ CARD_LIBRARY = {
         "cost": 1,
         "thickness": 0.5,
         "type": "movement",
+        "rarity": "common",
         # effect tells card_effects.py which function should resolve the card.
         "effect": "move",
         "move_range": 2,
@@ -16,6 +17,7 @@ CARD_LIBRARY = {
     "basic_attack": {
         "name": "Basic Attack",
         "cost": 1,
+        "rarity": "common",
         "thickness": 0.5,
         "type": "attack",
         "effect": "basic_attack",
@@ -24,6 +26,11 @@ CARD_LIBRARY = {
         # Characters read the same range differently: Archer shoots a row, Warrior slashes lanes.
         "range": 2,
         "description": "Use this character's basic attack shape.",
+        "image_path": "cards/card_assets/Bow shot.png",
+        "character_image_paths": {
+            "Archer": "cards/card_assets/Bow shot.png",
+            "Warrior": "cards/card_assets/Axe slash.png"
+        },
         "character_names": {
             "Archer": "Bow Shot",
             "Warrior": "Axe Slash"
@@ -37,15 +44,17 @@ CARD_LIBRARY = {
         "type": "attack",
         "effect": "pierce_row",
         "damage": 2,
+        "rarity": "rare",
         # Pierce hits more than one enemy, but still respects the player's row.
         "max_targets": 2,
         "range": "player_row",
         "usable_characters": ["Archer"],
         "description": "Pierce your row. Hit up to 2 enemies.",
-        "image_path": "cards/card_assets/pierce shot.png"
+        "image_path": "cards/card_assets/perice shot.png"
     },
 
     "cleave": {
+        "rarity": "rare",
         "name": "Cleave",
         "cost": 2,
         "thickness": 0.5,
@@ -53,7 +62,8 @@ CARD_LIBRARY = {
         "effect": "cleave_column",
         "damage": 2,
         "usable_characters": ["Warrior"],
-        "description": "Cleave a column. Hit every enemy in that column."
+        "description": "Cleave a column. Hit every enemy in that column.",
+        "image_path": "cards/card_assets/cleave.png"
     }
 
 }

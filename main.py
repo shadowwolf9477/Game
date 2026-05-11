@@ -14,11 +14,32 @@ from state.game_state import HOME_MENU, BATTLE, CHARACTER_SELECT, PLAYER_TURN, E
 from cards.card_sleeves import CARD_SLEEVES
 from cards.sleeve_effects import apply_sleeve, can_apply_sleeve
 from cards.card_effects import character_can_use_card
+from cards.card_rewards import generate_card_rewards
 
-from battle_setup import start_tutorial_battle, choose_goblin_attack, clear_incoming_attacks
+from battle_setup import (
+    start_tutorial_battle,
+    start_map_battle,
+    prepare_enemy_attacks,
+    clear_incoming_attacks,
+    clear_enemy_incoming_attacks,
+    resolve_enemy_incoming_attacks,
+    sync_enemy_grid
+)
 from maps.map_loader import generate_map
 from screens.map_screen import draw_map_screen, get_clicked_map_node, complete_map_node
-from screens.reward_screen import draw_reward_screen, get_reward_choice_click, get_clicked_reward_deck_card
+from screens.reward_screen import (
+    draw_reward_screen,
+    get_reward_choice_click,
+    get_clicked_reward_deck_card,
+    get_clicked_card_reward
+)
+from screens.pile_screen import (
+    draw_pile_buttons,
+    draw_pile_viewer,
+    get_clicked_pile_button,
+    get_pile_view_close_clicked,
+    get_pile_max_scroll
+)
 from party_manager import (
     make_party,
     place_party_on_grid,
@@ -29,11 +50,11 @@ from party_manager import (
 
 from battle_grid import create_grid_data
 from loaders.battle_assets import load_battle_assets
-from movement import move_unit
+from movement import move_unit, can_land_on_tile
 from menus.game_over_menu import draw_game_over_menu
 from battle_renderer import draw_battle
 from state.animation_state import update_animation_frame
-from battle_turn_logic import finish_enemy_attack
+from battle_turn_logic import finish_enemy_attack, get_next_attacking_enemy_index
 
 from cards.card_renderer import draw_card_hand, get_clicked_card_index
 from cards.card_effects import play_card
@@ -75,6 +96,7 @@ selected_character_index = 0
 selected_character = None
 
 current_turn = PLAYER_TURN
+battle_number = 0
 
 player_grid_data = create_grid_data()
 enemy_grid_data = create_grid_data()
@@ -93,6 +115,13 @@ selected_card_index = None
 max_energy = 3
 current_energy = 3
 
+# Combat pile viewer state.
+# Draw pile view is a shuffled copy so it does not reveal exact draw order.
+pile_view_title = None
+pile_view_cards = []
+pile_scroll_y = 0
+target_pile_scroll_y = 0
+
 # Map state.
 # map_layers is generated after the tutorial fight and then remembered.
 map_layers = []
@@ -100,9 +129,14 @@ current_map_layer = 0
 
 # Reward state.
 # reward_mode switches the popup between reward choice and deck-card choice.
+
 reward_mode = "choose_reward"
-deck_scroll = 0
+deck_scroll_y = 0
+target_deck_scroll_y = 0
 selected_sleeve = None
+card_reward_choices = []
+
+
 
 
 
@@ -120,23 +154,33 @@ movement_steps_left = 0
 
 # Battle assets.
 # These frame lists are reused every frame instead of reloading images.
-battle_background, satyr_idle_frames, satyr_attack_frames = load_battle_assets()
+battle_background, enemy_assets = load_battle_assets()
+
+
+def apply_enemy_assets(enemies, enemy_assets):
+    for enemy in enemies:
+        assets = enemy_assets[enemy["type"]]
+        enemy["idle_frames"] = assets["idle_frames"]
+        enemy["attack_frames"] = assets["attack_frames"]
+        enemy["idle_frames_flipped"] = assets["idle_frames_flipped"]
+        enemy["attack_frames_flipped"] = assets["attack_frames_flipped"]
 
 
 # Animation state.
 # Timers count game frames; frame indexes choose which sprite image to draw.
-satyr_idle_frame_index = 0
-satyr_animation_timer = 0
-satyr_animation_speed = 20
+enemy_idle_frame_index = 0
+enemy_animation_timer = 0
+enemy_animation_speed = 16
 
-satyr_attack_frame_index = 0
-satyr_attack_timer = 0
-satyr_attack_speed = 8
+enemy_attack_frame_index = 0
+enemy_attack_timer = 0
+enemy_attack_speed = 6
 enemy_is_attacking = False
+attacking_enemy_index = None
 
 player_idle_frame_index = 0
 player_animation_timer = 0
-player_animation_speed = 20
+player_animation_speed = 16
 
 
 current_state = HOME_MENU
@@ -149,12 +193,38 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
+        if event.type == pygame.MOUSEWHEEL:
+            if current_state == REWARD and reward_mode == "choose_sleeve_card":
+
+                target_deck_scroll_y -= event.y * 60
+
+                max_scroll = max(0, ((len(player_deck) + 3) // 4) * 220 - 420)
+
+                if target_deck_scroll_y < 0:
+                    target_deck_scroll_y = 0
+
+                if target_deck_scroll_y > max_scroll:
+                    target_deck_scroll_y = max_scroll
+
+            if current_state == BATTLE and pile_view_title is not None:
+                target_pile_scroll_y -= event.y * 60
+                max_scroll = get_pile_max_scroll(pile_view_cards)
+
+                if target_pile_scroll_y < 0:
+                    target_pile_scroll_y = 0
+
+                if target_pile_scroll_y > max_scroll:
+                    target_pile_scroll_y = max_scroll
         if event.type == pygame.KEYDOWN:
             if current_state == BATTLE and current_turn == PLAYER_TURN:
                 selected_character = get_selected_character(party, selected_character_index)
 
                 if event.key == pygame.K_g:
                     # G cancels card/user selection and exits movement preview.
+                    pile_view_title = None
+                    pile_view_cards = []
+                    pile_scroll_y = 0
+                    target_pile_scroll_y = 0
                     selected_card_index = None
                     movement_mode = False
                     movement_card = None
@@ -175,7 +245,10 @@ while running:
                     if event.key == pygame.K_DOWN:
                         row_change = 1
 
-                    if row_change != 0 or col_change != 0:
+                    if (
+                        (row_change != 0 or col_change != 0)
+                        and current_energy >= movement_card["cost"]
+                    ):
                         # Clamp preview movement so the planned path stays inside the player grid.
                         next_row = movement_preview_row + row_change
                         next_col = movement_preview_col + col_change
@@ -203,7 +276,12 @@ while running:
                             movement_preview_path.append((movement_preview_row, movement_preview_col))
                             movement_steps_left -= 1
 
-                    if event.key == pygame.K_e and len(movement_preview_path) > 0 and selected_card_index is not None:
+                    if (
+                        event.key == pygame.K_e
+                        and len(movement_preview_path) > 0
+                        and selected_card_index is not None
+                        and can_land_on_tile(player_grid_data, movement_preview_row, movement_preview_col, movement_card_user)
+                    ):
                         # E confirms the movement card, then spends/discards it.
                         selected_card = player_hand[selected_card_index]
                         card_was_played, current_energy, card_result = play_card(
@@ -239,7 +317,7 @@ while running:
                             selected_card_index = None
                             continue
 
-                        if selected_card["effect"] == "move":
+                        if selected_card["effect"] == "move" and current_energy >= selected_card["cost"]:
                             movement_mode = True
                             movement_card = selected_card
                             movement_card_user = selected_character
@@ -256,6 +334,7 @@ while running:
                             )
 
                             if card_was_played:
+                                sync_enemy_grid(enemies, enemy_grid_data)
                                 played_card = player_hand.pop(selected_card_index)
                                 discard_pile.append(played_card)
                                 selected_card_index = None
@@ -269,7 +348,8 @@ while running:
                                     movement_card_user = None
                                     movement_preview_path = []
                                     reward_mode = "choose_reward"
-                                    deck_scroll = 0
+                                    deck_scroll_y = 0
+                                    target_deck_scroll_y = 0
                                     current_state = REWARD
 
                                     if len(map_layers) == 0:
@@ -287,7 +367,7 @@ while running:
                     if event.key == pygame.K_DOWN:
                         move_unit(selected_character, player_grid_data, 1, 0)
 
-        if event.type == pygame.MOUSEBUTTONDOWN:
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if current_state == HOME_MENU:
                 # Home menu only chooses between leaving or character select.
                 if quit_button.is_clicked(event.pos):
@@ -319,12 +399,41 @@ while running:
                     movement_preview_path = []
 
                     current_state = BATTLE
+                    battle_number = 1
 
                     start_tutorial_battle(enemies, enemy_grid_data)
-                    choose_goblin_attack(player_grid_data)
+                    apply_enemy_assets(enemies, enemy_assets)
+                    prepare_enemy_attacks(enemies, player_grid_data)
 
             if current_state == BATTLE:
                 # Battle clicks either select cards, confirm movement, play cards, or end turn.
+                if pile_view_title is not None:
+                    if get_pile_view_close_clicked(event.pos):
+                        pile_view_title = None
+                        pile_view_cards = []
+                        pile_scroll_y = 0
+                        target_pile_scroll_y = 0
+
+                    continue
+
+                clicked_pile_button = get_clicked_pile_button(event.pos)
+
+                if clicked_pile_button == "draw":
+                    pile_view_title = "Deck"
+                    pile_view_cards = shuffle_deck(draw_pile)
+                    pile_scroll_y = 0
+                    target_pile_scroll_y = 0
+                    selected_card_index = None
+                    continue
+
+                if clicked_pile_button == "discard":
+                    pile_view_title = "Discard"
+                    pile_view_cards = discard_pile.copy()
+                    pile_scroll_y = 0
+                    target_pile_scroll_y = 0
+                    selected_card_index = None
+                    continue
+
                 clicked_card_index = get_clicked_card_index(player_hand, event.pos)
                 clicked_character_index = get_clicked_character_index(party, event.pos)
 
@@ -341,7 +450,7 @@ while running:
                     if selected_card_index is not None and current_turn == PLAYER_TURN:
                         selected_card = player_hand[selected_card_index]
 
-                        if selected_card["effect"] == "move":
+                        if selected_card["effect"] == "move" and current_energy >= selected_card["cost"]:
                             # Movement preview starts after choosing who will move, but costs nothing yet.
                             movement_mode = True
                             movement_card = selected_card
@@ -364,7 +473,13 @@ while running:
                             selected_character_index = usable_character_index
                             selected_character = get_selected_character(party, selected_character_index)
 
-                if play_card_button.is_clicked(event.pos) and movement_mode and len(movement_preview_path) > 0 and selected_card_index is not None:
+                if (
+                    play_card_button.is_clicked(event.pos)
+                    and movement_mode
+                    and len(movement_preview_path) > 0
+                    and selected_card_index is not None
+                    and can_land_on_tile(player_grid_data, movement_preview_row, movement_preview_col, movement_card_user)
+                ):
                     # In movement mode, the Play Card button confirms and pays for the card.
                     selected_card = player_hand[selected_card_index]
                     card_was_played, current_energy, card_result = play_card(
@@ -397,7 +512,7 @@ while running:
                         selected_card_index = None
                         continue
 
-                    if selected_card["effect"] == "move":
+                    if selected_card["effect"] == "move" and current_energy >= selected_card["cost"]:
                         # Movement cards enter preview first; energy is spent on confirmation.
                         movement_mode = True
                         movement_card = selected_card
@@ -416,6 +531,7 @@ while running:
                         )
 
                         if card_was_played:
+                            sync_enemy_grid(enemies, enemy_grid_data)
                             played_card = player_hand.pop(selected_card_index)
                             discard_pile.append(played_card)
                             selected_card_index = None
@@ -428,7 +544,8 @@ while running:
                                 movement_card = None
                                 movement_preview_path = []
                                 reward_mode = "choose_reward"
-                                deck_scroll = 0
+                                deck_scroll_y = 0
+                                target_deck_scroll_y = 0
                                 current_state = REWARD
 
                                 if len(map_layers) == 0:
@@ -444,9 +561,27 @@ while running:
 
                     current_turn = ENEMY_TURN
                     enemy_is_attacking = True
+                    attacking_enemy_index = get_next_attacking_enemy_index(enemies, -1)
                     selected_card_index = None
-                    satyr_attack_frame_index = 0
-                    satyr_attack_timer = 0
+                    enemy_attack_frame_index = 0
+                    enemy_attack_timer = 0
+
+                    if attacking_enemy_index is None:
+                        enemy_is_attacking = False
+                        next_state, next_turn = finish_enemy_attack(
+                            party,
+                            player_grid_data,
+                            enemy_grid_data,
+                            enemies
+                        )
+
+                        if next_state is not None:
+                            current_state = next_state
+
+                        if next_turn is not None:
+                            current_turn = next_turn
+                            current_energy = max_energy
+                            draw_cards(draw_pile, discard_pile, player_hand, 5)
             if current_state == MAP:
                 clicked_node = get_clicked_map_node(map_layers, event.pos)
 
@@ -463,8 +598,10 @@ while running:
                         place_party_on_grid(party, player_grid_data)
                         selected_character = get_selected_character(party, selected_character_index)
 
-                        start_tutorial_battle(enemies, enemy_grid_data)
-                        choose_goblin_attack(player_grid_data)
+                        battle_number += 1
+                        start_map_battle(enemies, enemy_grid_data, battle_number)
+                        apply_enemy_assets(enemies, enemy_assets)
+                        prepare_enemy_attacks(enemies, player_grid_data)
 
                         selected_card_index = None
                         movement_mode = False
@@ -507,16 +644,27 @@ while running:
                     reward_choice = get_reward_choice_click(event.pos)
 
                     if reward_choice == "new_card":
-                        print("New card reward later")
+                        card_reward_choices = generate_card_rewards(party, 3)
+                        reward_mode = "choose_new_card"
+
 
                     if reward_choice == "sleeve":
                         # Premium Sleeve modifies one valid card already in the deck.
                         selected_sleeve = CARD_SLEEVES["premium_sleeve"]
                         reward_mode = "choose_sleeve_card"
+                        deck_scroll_y = 0
+                        target_deck_scroll_y = 0
 
+                elif reward_mode == "choose_new_card":
+                    clicked_card = get_clicked_card_reward(card_reward_choices, event.pos)
+
+                    if clicked_card is not None:
+                        player_deck.append(clicked_card)
+                        card_reward_choices = []
+                        current_state = MAP
 
                 elif reward_mode == "choose_sleeve_card":
-                    clicked_card = get_clicked_reward_deck_card(player_deck, deck_scroll, event.pos)
+                    clicked_card = get_clicked_reward_deck_card(player_deck, deck_scroll_y, event.pos)
 
                     if clicked_card is not None and apply_sleeve(selected_sleeve, clicked_card):
                         current_state = MAP
@@ -544,9 +692,13 @@ while running:
 
                     current_turn = PLAYER_TURN
                     current_state = CHARACTER_SELECT
+                    battle_number = 0
 
                 if game_over_quit_button.is_clicked(event.pos):
                     running = False
+
+    deck_scroll_y += (target_deck_scroll_y - deck_scroll_y) * 0.2
+    pile_scroll_y += (target_pile_scroll_y - pile_scroll_y) * 0.2
 
     screen.fill(DARK_BG)
 
@@ -573,50 +725,61 @@ while running:
             max_character_idle_frames
         )
 
-        satyr_animation_timer, satyr_idle_frame_index = update_animation_frame(
-            satyr_animation_timer,
-            satyr_idle_frame_index,
-            satyr_animation_speed,
-            len(satyr_idle_frames)
+        max_enemy_idle_frames = 1
+        if enemies:
+            max_enemy_idle_frames = max(len(enemy["idle_frames"]) for enemy in enemies)
+
+        enemy_animation_timer, enemy_idle_frame_index = update_animation_frame(
+            enemy_animation_timer,
+            enemy_idle_frame_index,
+            enemy_animation_speed,
+            max_enemy_idle_frames
         )
 
         if current_turn == ENEMY_TURN and enemy_is_attacking:
             # Enemy damage resolves after the attack animation finishes.
-            satyr_attack_timer += 1
+            enemy_attack_timer += 1
 
-            if satyr_attack_timer >= satyr_attack_speed:
-                satyr_attack_timer = 0
-                satyr_attack_frame_index += 1
+            if enemy_attack_timer >= enemy_attack_speed:
+                enemy_attack_timer = 0
+                enemy_attack_frame_index += 1
 
-                if satyr_attack_frame_index >= len(satyr_attack_frames):
-                    enemy_is_attacking = False
-                    satyr_attack_frame_index = 0
+                attack_frames = enemies[attacking_enemy_index]["attack_frames"]
 
-                    next_state, next_turn = finish_enemy_attack(
-                        party,
-                        player_grid_data,
-                        enemy_grid_data,
-                        enemies
-                    )
+                if enemy_attack_frame_index >= len(attack_frames):
+                    attacking_enemy = enemies[attacking_enemy_index]
+                    resolve_enemy_incoming_attacks(attacking_enemy, party, player_grid_data)
+                    clear_enemy_incoming_attacks(attacking_enemy, player_grid_data)
 
-                    if next_state is not None:
-                        current_state = next_state
+                    if all(character["current_hp"] <= 0 for character in party):
+                        current_state = GAME_OVER
+                        enemy_is_attacking = False
+                        attacking_enemy_index = None
+                    else:
+                        attacking_enemy_index = get_next_attacking_enemy_index(enemies, attacking_enemy_index)
+                        enemy_attack_frame_index = 0
 
-                    if next_turn is not None:
-                        current_turn = next_turn
-                        current_energy = max_energy
-                        draw_cards(draw_pile, discard_pile, player_hand, 5)
+                        if attacking_enemy_index is None:
+                            enemy_is_attacking = False
+
+                            next_state, next_turn = finish_enemy_attack(
+                                party,
+                                player_grid_data,
+                                enemy_grid_data,
+                                enemies
+                            )
+
+                            if next_state is not None:
+                                current_state = next_state
+
+                            if next_turn is not None:
+                                current_turn = next_turn
+                                current_energy = max_energy
+                                draw_cards(draw_pile, discard_pile, player_hand, 5)
 
     if current_state == BATTLE or current_state == GAME_OVER:
         # Draw the battle underneath game-over so the loss still has context.
         screen.blit(battle_background, (0, 0))
-
-        if enemy_is_attacking:
-            satyr_image = satyr_attack_frames[satyr_attack_frame_index]
-        else:
-            satyr_image = satyr_idle_frames[satyr_idle_frame_index]
-
-        satyr_image = pygame.transform.flip(satyr_image, True, False)
 
         selected_card = None
 
@@ -646,13 +809,18 @@ while running:
             player_grid_data,
             enemies,
             player_idle_frame_index,
-            satyr_image,
+            enemy_idle_frame_index,
+            enemy_attack_frame_index,
+            enemy_is_attacking,
+            attacking_enemy_index,
+            enemy_assets["counter"],
             player_preview_tiles,
             enemy_preview_tiles
         )
 
         mouse_pos = pygame.mouse.get_pos()
         draw_card_hand(screen, player_hand, mouse_pos, selected_card_index, selected_character, small_font)
+        draw_pile_buttons(screen, small_font, len(draw_pile), len(discard_pile))
 
         if movement_mode:
             confirm_text = font.render("Choose movement, then press E or Play Card", True, WHITE)
@@ -661,17 +829,22 @@ while running:
 
         if current_state == GAME_OVER:
             draw_game_over_menu(screen, font, play_again_button, game_over_quit_button)
+
+        if pile_view_title is not None:
+            draw_pile_viewer(screen, font, small_font, pile_view_title, pile_view_cards, pile_scroll_y)
+
     if current_state == REWARD:
         draw_reward_screen(
             screen,
             font,
             small_font,
             reward_mode,
+            card_reward_choices,
             player_deck,
-            deck_scroll,
+            deck_scroll_y,
             selected_sleeve,
-            can_apply_sleeve
-        )
+            can_apply_sleeve)
+
 
 
     pygame.display.flip()

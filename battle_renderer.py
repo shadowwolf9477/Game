@@ -20,6 +20,22 @@ ENERGY_BAR_SOURCE_RECT = pygame.Rect(0, 20, 98, 16)
 ENERGY_BAR_SCALE = 2
 
 
+def render_outlined_text(font, text, text_color, outline_color=(0, 0, 0)):
+    base_text = font.render(text, True, text_color)
+    outlined_text = pygame.Surface(
+        (base_text.get_width() + 4, base_text.get_height() + 4),
+        pygame.SRCALPHA
+    )
+
+    for offset_x, offset_y in [(-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)]:
+        outline_text = font.render(text, True, outline_color)
+        outlined_text.blit(outline_text, (offset_x + 2, offset_y + 2))
+
+    outlined_text.blit(base_text, (2, 2))
+
+    return outlined_text
+
+
 def get_energy_bar_image(image_path):
     # Crop the second-row bar from the UI sheet and scale it for readability.
     if image_path not in ENERGY_BAR_CACHE:
@@ -68,7 +84,11 @@ def draw_battle(
     player_grid_data,
     enemies,
     player_idle_frame_index,
-    satyr_image,
+    enemy_idle_frame_index,
+    enemy_attack_frame_index,
+    enemy_is_attacking,
+    attacking_enemy_index,
+    counter_image,
     player_preview_tiles,
     enemy_preview_tiles
 ):
@@ -80,9 +100,9 @@ def draw_battle(
     play_card_button.draw(screen, font)
 
     for index, character in enumerate(party):
-        hp_text = font.render(
+        hp_text = render_outlined_text(
+            font,
             character["name"] + " HP: " + str(character["current_hp"]) + "/" + str(character["max_hp"]),
-            True,
             WHITE
         )
         screen.blit(hp_text, (HP_X, HP_Y + index * 34))
@@ -110,34 +130,64 @@ def draw_battle(
     for character in party:
         player_x = PLAYER_GRID_X + character["col"] * (GRID_SIZE + GRID_GAP)
         player_y = GRID_Y + character["row"] * (GRID_SIZE + GRID_GAP)
-        player_image = character["idle_frames"][player_idle_frame_index % len(character["idle_frames"])]
 
         if character.get("flip_x"):
-            player_image = pygame.transform.flip(player_image, True, False)
+            frames = character["idle_frames_flipped"]
+        else:
+            frames = character["idle_frames"]
+
+        player_image = frames[player_idle_frame_index % len(frames)]
 
         screen.blit(player_image, (player_x, player_y))
 
-    # Enemy side currently renders the first enemy only.
-    # This will need a loop when multi-enemy battles are added.
     if enemies:
-        first_enemy = enemies[0]
+        selected_enemy = enemies[0]
 
         draw_grid(
             screen,
             ENEMY_GRID_X,
             GRID_Y,
-            first_enemy["row"],
-            first_enemy["col"],
+            selected_enemy["row"],
+            selected_enemy["col"],
             None,
             enemy_preview_tiles
         )
 
-        enemy_x = ENEMY_GRID_X + first_enemy["col"] * (GRID_SIZE + GRID_GAP)
-        enemy_y = GRID_Y + first_enemy["row"] * (GRID_SIZE + GRID_GAP)
+        for index, enemy in enumerate(enemies):
+            enemy_x = ENEMY_GRID_X + enemy["col"] * (GRID_SIZE + GRID_GAP)
+            enemy_y = GRID_Y + enemy["row"] * (GRID_SIZE + GRID_GAP)
 
-        enemy_hp_text = font.render("HP: " + str(first_enemy["hp"]), True, WHITE)
-        screen.blit(enemy_hp_text, (enemy_x, enemy_y - 45))
+            enemy_hp_text = render_outlined_text(font, "HP: " + str(enemy["hp"]), WHITE)
+            screen.blit(enemy_hp_text, (enemy_x, enemy_y - 45))
 
-        screen.blit(satyr_image, (enemy_x, enemy_y))
+            if enemy_is_attacking and index == attacking_enemy_index:
+                if enemy.get("flip_x", True):
+                    frames = enemy["attack_frames_flipped"]
+                else:
+                    frames = enemy["attack_frames"]
+
+                enemy_image = frames[enemy_attack_frame_index % len(frames)]
+            else:
+                if enemy.get("flip_x", True):
+                    frames = enemy["idle_frames_flipped"]
+                else:
+                    frames = enemy["idle_frames"]
+
+                enemy_image = frames[enemy_idle_frame_index % len(frames)]
+
+            enemy_draw_x = enemy_x - (enemy_image.get_width() - GRID_SIZE) // 2
+            enemy_draw_y = enemy_y - (enemy_image.get_height() - GRID_SIZE)
+            screen.blit(enemy_image, (enemy_draw_x, enemy_draw_y))
+            draw_enemy_attack_counter(screen, font, counter_image, enemy, enemy_x, enemy_y)
     else:
         draw_grid(screen, ENEMY_GRID_X, GRID_Y, None, None, None, enemy_preview_tiles)
+
+
+def draw_enemy_attack_counter(screen, font, counter_image, enemy, enemy_x, enemy_y):
+    counter_x = enemy_x + GRID_SIZE - 32
+    counter_y = enemy_y + GRID_SIZE - 32
+    screen.blit(counter_image, (counter_x, counter_y))
+
+    counter_text = render_outlined_text(font, str(enemy["turns_until_attack"]), WHITE)
+    text_rect = counter_text.get_rect(center=(counter_x + 19, counter_y + 19))
+    screen.blit(counter_text, text_rect)
