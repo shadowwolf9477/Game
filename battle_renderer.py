@@ -8,6 +8,8 @@ from settings import (
     PLAYER_GRID_X,
     ENEMY_GRID_X,
     GRID_Y,
+    SCREEN_WIDTH,
+    SCREEN_HEIGHT,
     BATTLE_TITLE_X,
     BATTLE_TITLE_Y,
     HP_X,
@@ -94,7 +96,8 @@ def draw_battle(
     player_attack_animation,
     counter_image,
     player_preview_tiles,
-    enemy_preview_tiles
+    enemy_preview_tiles,
+    enemy_movement_preview_tiles
 ):
     # Draw battle title, controls, and player resources.
     battle_text = font.render("Battle", True, WHITE)
@@ -180,7 +183,8 @@ def draw_battle(
             selected_enemy["row"],
             selected_enemy["col"],
             enemy_grid_data,
-            enemy_preview_tiles
+            enemy_preview_tiles,
+            enemy_movement_preview_tiles
         )
 
         for index, enemy in enumerate(enemies):
@@ -210,7 +214,19 @@ def draw_battle(
             screen.blit(enemy_image, (enemy_draw_x, enemy_draw_y))
             draw_enemy_attack_counter(screen, font, counter_image, enemy, enemy_x, enemy_y)
     else:
-        draw_grid(screen, ENEMY_GRID_X, GRID_Y, None, None, enemy_grid_data, enemy_preview_tiles)
+        draw_grid(screen, ENEMY_GRID_X, GRID_Y, None, None, enemy_grid_data, enemy_preview_tiles, enemy_movement_preview_tiles)
+
+
+def get_clicked_enemy(enemies, mouse_pos):
+    for enemy in enemies:
+        enemy_x = ENEMY_GRID_X + enemy["col"] * (GRID_SIZE + GRID_GAP)
+        enemy_y = GRID_Y + enemy["row"] * (GRID_SIZE + GRID_GAP)
+        enemy_rect = pygame.Rect(enemy_x, enemy_y, GRID_SIZE, GRID_SIZE)
+
+        if enemy_rect.collidepoint(mouse_pos):
+            return enemy
+
+    return None
 
 
 def draw_enemy_attack_counter(screen, font, counter_image, enemy, enemy_x, enemy_y):
@@ -236,6 +252,146 @@ def draw_reaction_warning_edges(screen):
     pygame.draw.rect(overlay, warning_color, (screen_width - edge_size, 0, edge_size, screen_height))
 
     screen.blit(overlay, (0, 0))
+
+
+def draw_enemy_hover_tooltip(screen, small_font, enemies, mouse_pos):
+    hovered_enemy = get_hovered_enemy(enemies, mouse_pos)
+
+    if hovered_enemy is None:
+        return
+
+    lines = build_enemy_tooltip_lines(hovered_enemy)
+    tooltip_width = 330
+    line_height = small_font.get_height() + 4
+    tooltip_height = 18 + len(lines) * line_height
+    tooltip_x = mouse_pos[0] + 18
+    tooltip_y = mouse_pos[1] + 18
+
+    if tooltip_x + tooltip_width > SCREEN_WIDTH:
+        tooltip_x = mouse_pos[0] - tooltip_width - 18
+
+    if tooltip_y + tooltip_height > SCREEN_HEIGHT:
+        tooltip_y = SCREEN_HEIGHT - tooltip_height - 10
+
+    tooltip_rect = pygame.Rect(tooltip_x, tooltip_y, tooltip_width, tooltip_height)
+    pygame.draw.rect(screen, (18, 18, 28), tooltip_rect)
+    pygame.draw.rect(screen, (230, 230, 255), tooltip_rect, 2)
+
+    text_y = tooltip_y + 9
+
+    for index, line in enumerate(lines):
+        if index == 0:
+            text_color = (255, 235, 170)
+        else:
+            text_color = WHITE
+
+        text_image = small_font.render(line, True, text_color)
+        screen.blit(text_image, (tooltip_x + 10, text_y))
+        text_y += line_height
+
+
+def get_hovered_enemy(enemies, mouse_pos):
+    for enemy in enemies:
+        enemy_x = ENEMY_GRID_X + enemy["col"] * (GRID_SIZE + GRID_GAP)
+        enemy_y = GRID_Y + enemy["row"] * (GRID_SIZE + GRID_GAP)
+        hover_rect = pygame.Rect(enemy_x, enemy_y - 35, GRID_SIZE, GRID_SIZE + 35)
+        hover_rect = hover_rect.inflate(35, 20)
+
+        if hover_rect.collidepoint(mouse_pos):
+            return enemy
+
+    return None
+
+
+def build_enemy_tooltip_lines(enemy):
+    lines = [
+        enemy["name"],
+        "HP: " + str(enemy["hp"]) + "/" + str(enemy["max_hp"]),
+        "Attack: " + str(enemy["attack_damage"]) + " dmg",
+        "Timer: " + str(enemy["turns_until_attack"]) + "/" + str(enemy["attack_interval"]) + " turns",
+        "Pattern: " + get_enemy_pattern_text(enemy),
+        "Move: " + get_enemy_move_text(enemy)
+    ]
+
+    applied_status = get_enemy_applied_status_text(enemy)
+
+    if applied_status:
+        lines.append("Applies: " + applied_status)
+
+    active_status = get_enemy_active_status_text(enemy)
+
+    if active_status:
+        lines.append("Status: " + active_status)
+
+    return lines
+
+
+def get_enemy_pattern_text(enemy):
+    enemy_type = enemy["type"]
+
+    if enemy_type == "orc":
+        return "Attacks a 2x2 smash."
+
+    if enemy_type == "bone_caller":
+        return "Hits one full row."
+
+    if enemy_type == "skeleton":
+        attack_range = enemy.get("attack_range", 1)
+
+        if enemy.get("can_split", False):
+            return "Hits row range " + str(attack_range) + ". Splits at half HP."
+
+        return "Hits row range " + str(attack_range) + "."
+
+    if enemy_type == "crawler":
+        return "Hits its matching tile."
+
+    if enemy_type == "web_priest":
+        return "Attacks X or plus pattern."
+
+    return "Attacks 2 random tiles."
+
+
+def get_enemy_move_text(enemy):
+    enemy_type = enemy["type"]
+
+    if enemy_type == "orc":
+        return "After attacking, knight jump."
+
+    if enemy_type == "crawler":
+        return "Moves toward living characters."
+
+    return "Moves randomly."
+
+
+def get_enemy_applied_status_text(enemy):
+    enemy_type = enemy["type"]
+
+    if enemy_type == "crawler":
+        return "Snare: cannot move next turn."
+
+    if enemy_type == "web_priest":
+        return "Reaction lock, discard, weak attacks."
+
+    if enemy_type == "bone_caller":
+        return "Heals allies. Gains dmg when allies die."
+
+    return ""
+
+
+def get_enemy_active_status_text(enemy):
+    statuses = []
+
+    if enemy.get("ally_death_bonus", 0) > 0:
+        statuses.append("+" + str(enemy["ally_death_bonus"]) + " attack")
+
+    if enemy.get("can_split", False) and enemy["hp"] <= enemy.get("split_threshold", 0):
+        statuses.append("will split")
+
+    if enemy.get("turns_until_heal", 0) > 0:
+        statuses.append("heal in " + str(enemy["turns_until_heal"]))
+
+    return ", ".join(statuses)
 
 
 def draw_shield_button(screen, font, party, selected_character):

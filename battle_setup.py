@@ -612,22 +612,54 @@ def get_enemy_random_movement_steps(enemy, enemy_grid_data):
     return []
 
 
+def get_enemy_possible_movement_tiles(enemy, enemy_grid_data, party):
+    if enemy["type"] == "orc":
+        return get_orc_possible_movement_tiles(enemy, enemy_grid_data)
+
+    if enemy["type"] == "crawler":
+        return get_crawler_possible_movement_tiles(enemy, enemy_grid_data, party)
+
+    return get_random_step_possible_movement_tiles(enemy, enemy_grid_data)
+
+
+def get_random_step_possible_movement_tiles(enemy, enemy_grid_data):
+    possible_tiles = []
+    directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+
+    for row_change, col_change in directions:
+        next_row = enemy["row"] + row_change
+        next_col = enemy["col"] + col_change
+
+        if can_land_on_tile(enemy_grid_data, next_row, next_col, enemy):
+            possible_tiles.append((next_row, next_col))
+
+    return possible_tiles
+
+
+def get_crawler_possible_movement_tiles(enemy, enemy_grid_data, party):
+    preferred_steps = get_crawler_preferred_steps(enemy, party)
+    possible_tiles = []
+
+    for row_change, col_change in preferred_steps:
+        next_row = enemy["row"] + row_change
+        next_col = enemy["col"] + col_change
+
+        if can_land_on_tile(enemy_grid_data, next_row, next_col, enemy):
+            possible_tiles.append((next_row, next_col))
+
+    if possible_tiles:
+        return possible_tiles
+
+    return get_random_step_possible_movement_tiles(enemy, enemy_grid_data)
+
+
 def get_crawler_movement_steps(enemy, enemy_grid_data, party):
     target_character = get_closest_living_character(enemy, party)
 
     if target_character is None:
         return get_enemy_random_movement_steps(enemy, enemy_grid_data)
 
-    row_change = get_direction_step(enemy["row"], target_character["row"])
-    col_change = get_direction_step(enemy["col"], target_character["col"])
-    preferred_steps = []
-
-    if abs(enemy["col"] - target_character["col"]) >= abs(enemy["row"] - target_character["row"]):
-        preferred_steps.append((0, col_change))
-        preferred_steps.append((row_change, 0))
-    else:
-        preferred_steps.append((row_change, 0))
-        preferred_steps.append((0, col_change))
+    preferred_steps = get_crawler_preferred_steps(enemy, party)
 
     for step_row_change, step_col_change in preferred_steps:
         if step_row_change == 0 and step_col_change == 0:
@@ -645,6 +677,30 @@ def get_crawler_movement_steps(enemy, enemy_grid_data, party):
             }]
 
     return get_enemy_random_movement_steps(enemy, enemy_grid_data)
+
+
+def get_crawler_preferred_steps(enemy, party):
+    target_character = get_closest_living_character(enemy, party)
+
+    if target_character is None:
+        return []
+
+    row_change = get_direction_step(enemy["row"], target_character["row"])
+    col_change = get_direction_step(enemy["col"], target_character["col"])
+    preferred_steps = []
+
+    if abs(enemy["col"] - target_character["col"]) >= abs(enemy["row"] - target_character["row"]):
+        preferred_steps.append((0, col_change))
+        preferred_steps.append((row_change, 0))
+    else:
+        preferred_steps.append((row_change, 0))
+        preferred_steps.append((0, col_change))
+
+    return [
+        (row_change, col_change)
+        for row_change, col_change in preferred_steps
+        if row_change != 0 or col_change != 0
+    ]
 
 
 def get_closest_living_character(enemy, party):
@@ -722,6 +778,39 @@ def get_orc_knight_movement_steps(enemy, enemy_grid_data):
                 return step_path
 
     return []
+
+
+def get_orc_possible_movement_tiles(enemy, enemy_grid_data):
+    possible_tiles = []
+    knight_moves = [
+        (-2, -1),
+        (-2, 1),
+        (-1, -2),
+        (-1, 2),
+        (1, -2),
+        (1, 2),
+        (2, -1),
+        (2, 1)
+    ]
+
+    for row_change, col_change in knight_moves:
+        target_row = enemy["row"] + row_change
+        target_col = enemy["col"] + col_change
+
+        if not can_land_on_tile(enemy_grid_data, target_row, target_col, enemy):
+            continue
+
+        step_paths = [
+            build_step_path(enemy, row_change, col_change, True),
+            build_step_path(enemy, row_change, col_change, False)
+        ]
+
+        for step_path in step_paths:
+            if path_is_clear(enemy, enemy_grid_data, step_path):
+                possible_tiles.append((target_row, target_col))
+                break
+
+    return possible_tiles
 
 
 def build_step_path(enemy, row_change, col_change, row_first):

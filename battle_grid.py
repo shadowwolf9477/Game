@@ -2,13 +2,17 @@ import pygame
 from settings import GRID_ROWS, GRID_COLS, GRID_SIZE, GRID_GAP, WHITE, RED, ATTACK_WARNING, BLUE
 
 TRAP_COLOR = (180, 70, 255)
+MOVEMENT_PREVIEW_FILL = (8, 8, 12, 145)
 
 
-def draw_grid(screen, start_x, start_y, selected_row=None, selected_col=None, grid_data=None, preview_tiles=None):
+def draw_grid(screen, start_x, start_y, selected_row=None, selected_col=None, grid_data=None, preview_tiles=None, movement_preview_tiles=None):
     # Draw one board grid.
     # Blue previews take priority so card paths are readable over danger tiles.
     if preview_tiles is None:
         preview_tiles = []
+
+    if movement_preview_tiles is None:
+        movement_preview_tiles = []
 
     for row in range(GRID_ROWS):
         y = start_y + row * (GRID_SIZE + GRID_GAP)
@@ -20,6 +24,12 @@ def draw_grid(screen, start_x, start_y, selected_row=None, selected_col=None, gr
             tile_has_attack = grid_data and grid_data[row][col]["incoming_attack"] is not None
             tile_has_trap = grid_data and grid_data[row][col].get("effect") is not None
             tile_has_preview = (row, col) in preview_tiles
+            tile_has_movement_preview = (row, col) in movement_preview_tiles
+
+            if tile_has_movement_preview:
+                preview_surface = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
+                preview_surface.fill(MOVEMENT_PREVIEW_FILL)
+                screen.blit(preview_surface, (x, y))
 
             # Border color shows the most important information for this tile.
             if tile_has_preview:

@@ -34,7 +34,8 @@ from battle_setup import (
     handle_enemy_deaths,
     place_trap_on_enemy_grid,
     trigger_enemy_traps,
-    tick_traps
+    tick_traps,
+    get_enemy_possible_movement_tiles
 )
 from maps.map_loader import generate_map
 from screens.map_screen import draw_map_screen, get_clicked_map_node, complete_map_node
@@ -71,7 +72,7 @@ from loaders.battle_assets import load_battle_assets
 from loaders.sound_assets import load_battle_sounds, play_character_attack_sound
 from movement import move_unit, can_land_on_tile
 from menus.game_over_menu import draw_game_over_menu
-from battle_renderer import draw_battle, draw_reaction_warning_edges
+from battle_renderer import draw_battle, draw_reaction_warning_edges, draw_enemy_hover_tooltip, get_clicked_enemy
 from state.animation_state import update_animation_frame
 from damage_numbers import make_damage_popup, update_damage_popups, draw_damage_popups
 from battle_animations import (
@@ -206,6 +207,8 @@ enemy_death_animations = []
 projectile_animations = []
 player_attack_animation = None
 pending_reward_after_deaths = False
+selected_enemy_for_movement = None
+enemy_movement_preview_tiles = []
 
 
 # Battle assets.
@@ -397,6 +400,22 @@ def finish_shove():
         queue_reward_after_battle()
 
 
+def select_enemy_movement_preview(clicked_enemy):
+    global selected_enemy_for_movement
+    global enemy_movement_preview_tiles
+
+    selected_enemy_for_movement = clicked_enemy
+
+    if clicked_enemy is None:
+        enemy_movement_preview_tiles = []
+    else:
+        enemy_movement_preview_tiles = get_enemy_possible_movement_tiles(
+            clicked_enemy,
+            enemy_grid_data,
+            party
+        )
+
+
 def queue_reward_after_battle():
     global current_state
     global pending_reward_after_deaths
@@ -473,6 +492,8 @@ def reset_battle_animation_state():
     global shove_target
     global shove_card_user
     global shove_steps_left
+    global selected_enemy_for_movement
+    global enemy_movement_preview_tiles
 
     enemy_death_animations.clear()
     projectile_animations.clear()
@@ -482,6 +503,8 @@ def reset_battle_animation_state():
     shove_target = None
     shove_card_user = None
     shove_steps_left = 0
+    selected_enemy_for_movement = None
+    enemy_movement_preview_tiles = []
 
 
 def discard_random_cards_for_status():
@@ -859,6 +882,14 @@ while running:
 
                 selected_character = get_selected_character(party, selected_character_index)
                 shield_button_rect = get_shield_button_rect(party, selected_character)
+                clicked_enemy = get_clicked_enemy(enemies, event.pos)
+
+                if clicked_enemy is not None:
+                    select_enemy_movement_preview(clicked_enemy)
+                    selected_card_index = None
+                    continue
+                elif event.pos[0] >= ENEMY_GRID_X and event.pos[1] >= GRID_Y:
+                    select_enemy_movement_preview(None)
 
                 if (
                     shield_button_rect is not None
@@ -1231,6 +1262,9 @@ while running:
                             movement_step["col_change"]
                         )
 
+                        if enemy_moved and selected_enemy_for_movement is moving_enemy:
+                            select_enemy_movement_preview(moving_enemy)
+
                         if not enemy_moved:
                             enemy_movement_queue = [
                                 queued_step for queued_step in enemy_movement_queue
@@ -1244,6 +1278,10 @@ while running:
                                 add_damage_popups_from_hits(trap_hits, "enemy")
                                 queue_enemy_death_animations(enemies, enemy_death_animations)
                                 handle_enemy_deaths(enemies, enemy_grid_data)
+                                if selected_enemy_for_movement not in enemies:
+                                    select_enemy_movement_preview(None)
+                                elif selected_enemy_for_movement is not None:
+                                    select_enemy_movement_preview(selected_enemy_for_movement)
                                 clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
 
                                 if moving_enemy not in enemies:
@@ -1317,7 +1355,8 @@ while running:
             player_attack_animation,
             enemy_assets["counter"],
             player_preview_tiles,
-            enemy_preview_tiles
+            enemy_preview_tiles,
+            enemy_movement_preview_tiles
         )
 
         draw_enemy_death_animations(screen, enemy_death_animations)
@@ -1325,6 +1364,7 @@ while running:
         draw_damage_popups(screen, damage_popups)
 
         mouse_pos = pygame.mouse.get_pos()
+        draw_enemy_hover_tooltip(screen, small_font, enemies, mouse_pos)
         reaction_card_indices = []
 
         if reaction_mode:
