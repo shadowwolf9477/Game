@@ -1,5 +1,6 @@
 import pygame
 
+from loaders.asset_paths import asset_path
 from settings import (
     WHITE,
     GRID_SIZE,
@@ -13,6 +14,7 @@ from settings import (
     HP_Y
 )
 from battle_grid import draw_grid
+from party_manager import get_shield_button_rect, get_shield_target
 
 
 ENERGY_BAR_CACHE = {}
@@ -39,7 +41,7 @@ def render_outlined_text(font, text, text_color, outline_color=(0, 0, 0)):
 def get_energy_bar_image(image_path):
     # Crop the second-row bar from the UI sheet and scale it for readability.
     if image_path not in ENERGY_BAR_CACHE:
-        sheet = pygame.image.load(image_path).convert_alpha()
+        sheet = pygame.image.load(asset_path(image_path)).convert_alpha()
         bar_image = sheet.subsurface(ENERGY_BAR_SOURCE_RECT)
         bar_image = pygame.transform.scale(
             bar_image,
@@ -82,12 +84,14 @@ def draw_battle(
     current_energy,
     max_energy,
     player_grid_data,
+    enemy_grid_data,
     enemies,
     player_idle_frame_index,
     enemy_idle_frame_index,
     enemy_attack_frame_index,
     enemy_is_attacking,
     attacking_enemy_index,
+    player_attack_animation,
     counter_image,
     player_preview_tiles,
     enemy_preview_tiles
@@ -102,7 +106,8 @@ def draw_battle(
     for index, character in enumerate(party):
         hp_text = render_outlined_text(
             font,
-            character["name"] + " HP: " + str(character["current_hp"]) + "/" + str(character["max_hp"]),
+            character["name"] + " HP: " + str(character["current_hp"]) + "/" + str(character["max_hp"])
+            + " B:" + str(character.get("block", 0)),
             WHITE
         )
         screen.blit(hp_text, (HP_X, HP_Y + index * 34))
@@ -131,14 +136,39 @@ def draw_battle(
         player_x = PLAYER_GRID_X + character["col"] * (GRID_SIZE + GRID_GAP)
         player_y = GRID_Y + character["row"] * (GRID_SIZE + GRID_GAP)
 
-        if character.get("flip_x"):
-            frames = character["idle_frames_flipped"]
+        if character["current_hp"] <= 0 and character.get("death_animation_done", False):
+            if character.get("flip_x"):
+                frames = character["death_frames_flipped"]
+            else:
+                frames = character["death_frames"]
+
+            frame_index = min(character.get("death_frame_index", 0), len(frames) - 1)
+
+        elif (
+            player_attack_animation is not None
+            and player_attack_animation["character"] is character
+        ):
+            if character.get("flip_x"):
+                frames = character["attack_frames_flipped"]
+            else:
+                frames = character["attack_frames"]
+
+            frame_index = player_attack_animation["frame_index"] % len(frames)
+
         else:
-            frames = character["idle_frames"]
+            if character.get("flip_x"):
+                frames = character["idle_frames_flipped"]
+            else:
+                frames = character["idle_frames"]
 
-        player_image = frames[player_idle_frame_index % len(frames)]
+            frame_index = player_idle_frame_index % len(frames)
 
-        screen.blit(player_image, (player_x, player_y))
+        player_image = frames[frame_index]
+        player_draw_x = player_x - (player_image.get_width() - GRID_SIZE) // 2
+        player_draw_y = player_y - (player_image.get_height() - GRID_SIZE)
+        screen.blit(player_image, (player_draw_x, player_draw_y))
+
+    draw_shield_button(screen, font, party, selected_character)
 
     if enemies:
         selected_enemy = enemies[0]
@@ -149,7 +179,7 @@ def draw_battle(
             GRID_Y,
             selected_enemy["row"],
             selected_enemy["col"],
-            None,
+            enemy_grid_data,
             enemy_preview_tiles
         )
 
@@ -180,7 +210,7 @@ def draw_battle(
             screen.blit(enemy_image, (enemy_draw_x, enemy_draw_y))
             draw_enemy_attack_counter(screen, font, counter_image, enemy, enemy_x, enemy_y)
     else:
-        draw_grid(screen, ENEMY_GRID_X, GRID_Y, None, None, None, enemy_preview_tiles)
+        draw_grid(screen, ENEMY_GRID_X, GRID_Y, None, None, enemy_grid_data, enemy_preview_tiles)
 
 
 def draw_enemy_attack_counter(screen, font, counter_image, enemy, enemy_x, enemy_y):
@@ -191,3 +221,42 @@ def draw_enemy_attack_counter(screen, font, counter_image, enemy, enemy_x, enemy
     counter_text = render_outlined_text(font, str(enemy["turns_until_attack"]), WHITE)
     text_rect = counter_text.get_rect(center=(counter_x + 19, counter_y + 19))
     screen.blit(counter_text, text_rect)
+
+
+def draw_reaction_warning_edges(screen):
+    warning_color = (255, 30, 40, 130)
+    edge_size = 34
+    screen_width = screen.get_width()
+    screen_height = screen.get_height()
+    overlay = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
+
+    pygame.draw.rect(overlay, warning_color, (0, 0, screen_width, edge_size))
+    pygame.draw.rect(overlay, warning_color, (0, screen_height - edge_size, screen_width, edge_size))
+    pygame.draw.rect(overlay, warning_color, (0, 0, edge_size, screen_height))
+    pygame.draw.rect(overlay, warning_color, (screen_width - edge_size, 0, edge_size, screen_height))
+
+    screen.blit(overlay, (0, 0))
+
+
+def draw_shield_button(screen, font, party, selected_character):
+    button_rect = get_shield_button_rect(party, selected_character)
+
+    if button_rect is None:
+        return
+
+    shield_target = get_shield_target(party, selected_character)
+    is_active = selected_character.get("shielding") is shield_target
+
+    if is_active:
+        button_color = (85, 190, 255)
+        button_text = "Shielding"
+    else:
+        button_color = (255, 255, 255)
+        button_text = "Shield?"
+
+    pygame.draw.rect(screen, button_color, button_rect)
+    pygame.draw.rect(screen, (0, 0, 0), button_rect, 2)
+
+    text_image = font.render(button_text, True, (0, 0, 0))
+    text_rect = text_image.get_rect(center=button_rect.center)
+    screen.blit(text_image, text_rect)

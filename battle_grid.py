@@ -1,6 +1,8 @@
 import pygame
 from settings import GRID_ROWS, GRID_COLS, GRID_SIZE, GRID_GAP, WHITE, RED, ATTACK_WARNING, BLUE
 
+TRAP_COLOR = (180, 70, 255)
+
 
 def draw_grid(screen, start_x, start_y, selected_row=None, selected_col=None, grid_data=None, preview_tiles=None):
     # Draw one board grid.
@@ -16,6 +18,7 @@ def draw_grid(screen, start_x, start_y, selected_row=None, selected_col=None, gr
             square = pygame.Rect(x, y, GRID_SIZE, GRID_SIZE)
 
             tile_has_attack = grid_data and grid_data[row][col]["incoming_attack"] is not None
+            tile_has_trap = grid_data and grid_data[row][col].get("effect") is not None
             tile_has_preview = (row, col) in preview_tiles
 
             # Border color shows the most important information for this tile.
@@ -23,13 +26,17 @@ def draw_grid(screen, start_x, start_y, selected_row=None, selected_col=None, gr
                 pygame.draw.rect(screen, BLUE, square, 3)
             elif tile_has_attack:
                 pygame.draw.rect(screen, ATTACK_WARNING, square, 4)
+            elif tile_has_trap:
+                pygame.draw.rect(screen, TRAP_COLOR, square, 4)
+                trap_center = square.center
+                pygame.draw.circle(screen, TRAP_COLOR, trap_center, 9)
             elif row == selected_row and col == selected_col:
                 pygame.draw.rect(screen, RED, square, 2)
             else:
                 pygame.draw.rect(screen, WHITE, square, 2)
 
 
-def create_grid_data():
+def create_grid_data(board_name):
     # Create logical tile data separate from what is drawn on screen.
     grid = []
 
@@ -38,6 +45,8 @@ def create_grid_data():
 
         for col in range(GRID_COLS):
             tile = {
+                # board keeps player and enemy boards separate even though both use row/col.
+                "board": board_name,
                 # unit stores a character/enemy dictionary currently on this tile.
                 "unit": None,
                 # effect is reserved for future traps, hazards, buffs, etc.
