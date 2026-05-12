@@ -50,5 +50,27 @@ def get_card_preview_tiles(card, selected_character):
 
         return preview_tiles
 
+    if card["effect"] == "shove":
+        player_row = selected_character["row"]
+        preview_tiles = []
+
+        for col in range(GRID_COLS):
+            preview_tiles.append((player_row, col))
+
+        return preview_tiles
+
+    if card["effect"] == "trap":
+        center_row = selected_character["row"]
+        center_col = selected_character["col"]
+        preview_tiles = []
+        trap_radius = card.get("trap_radius", 1)
+
+        for row in range(center_row - trap_radius, center_row + trap_radius + 1):
+            for col in range(center_col - trap_radius, center_col + trap_radius + 1):
+                if 0 <= row < GRID_ROWS and 0 <= col < GRID_COLS:
+                    preview_tiles.append((row, col))
+
+        return preview_tiles
+
     # Movement and unsupported cards do not preview enemy tiles.
     return []

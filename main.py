@@ -1,4 +1,5 @@
 import pygame
+import random
 
 from button import Button
 from settings import (
@@ -8,7 +9,12 @@ from settings import (
     WHITE,
     FPS,
     GRID_ROWS,
-    GRID_COLS
+    GRID_COLS,
+    GRID_SIZE,
+    GRID_GAP,
+    PLAYER_GRID_X,
+    ENEMY_GRID_X,
+    GRID_Y
 )
 from state.game_state import HOME_MENU, BATTLE, CHARACTER_SELECT, PLAYER_TURN, ENEMY_TURN, GAME_OVER, MAP, REWARD
 from cards.card_sleeves import CARD_SLEEVES
@@ -24,7 +30,12 @@ from battle_setup import (
     clear_enemy_incoming_attacks,
     clear_dead_enemy_incoming_attacks,
     resolve_enemy_incoming_attacks,
-    sync_enemy_grid
+    sync_enemy_grid,
+    handle_enemy_deaths,
+    place_trap_on_enemy_grid,
+    trigger_enemy_traps,
+    tick_traps,
+    get_enemy_possible_movement_tiles
 )
 from maps.map_loader import generate_map
 from screens.map_screen import draw_map_screen, get_clicked_map_node, complete_map_node
@@ -46,19 +57,44 @@ from party_manager import (
     place_party_on_grid,
     get_selected_character,
     get_clicked_character_index,
-    get_first_usable_character_index
+    get_first_usable_character_index,
+    get_shield_button_rect,
+    get_shield_target,
+    clear_party_shields,
+    clear_shields_involving_character,
+    remove_broken_shields,
+    tick_party_statuses,
+    tick_enemy_turn_statuses
 )
 
 from battle_grid import create_grid_data
 from loaders.battle_assets import load_battle_assets
+from loaders.sound_assets import load_battle_sounds, play_character_attack_sound
 from movement import move_unit, can_land_on_tile
 from menus.game_over_menu import draw_game_over_menu
-from battle_renderer import draw_battle
+from battle_renderer import draw_battle, draw_reaction_warning_edges, draw_enemy_hover_tooltip, get_clicked_enemy
 from state.animation_state import update_animation_frame
-from battle_turn_logic import finish_enemy_attack, get_next_attacking_enemy_index
+from damage_numbers import make_damage_popup, update_damage_popups, draw_damage_popups
+from battle_animations import (
+    make_player_attack_animation,
+    update_player_attack_animation,
+    queue_enemy_death_animations,
+    update_enemy_death_animations,
+    draw_enemy_death_animations,
+    start_player_death_animations_from_hits,
+    update_party_death_animations,
+    make_arrow_projectile,
+    update_projectile_animations,
+    draw_projectile_animations
+)
+from battle_turn_logic import (
+    build_enemy_movement_queue,
+    finish_enemy_turn,
+    get_next_attacking_enemy_index
+)
 
 from cards.card_renderer import draw_card_hand, get_clicked_card_index
-from cards.card_effects import play_card
+from cards.card_effects import play_card, play_reaction_card, get_reaction_cost
 from cards.card_targeting import get_card_preview_tiles
 from cards.player_deck import build_starting_deck, shuffle_deck, draw_cards
 
@@ -73,6 +109,7 @@ pygame.display.set_caption("Roguelike Game")
 font = pygame.font.Font(None, 50)
 # Smaller text keeps reward-card labels inside their temporary boxes.
 small_font = pygame.font.Font(None, 34)
+battle_sounds = load_battle_sounds()
 
 
 
@@ -98,9 +135,10 @@ selected_character = None
 
 current_turn = PLAYER_TURN
 battle_number = 0
+last_battle_room = None
 
-player_grid_data = create_grid_data()
-enemy_grid_data = create_grid_data()
+player_grid_data = create_grid_data("player")
+enemy_grid_data = create_grid_data("enemy")
 enemies = []
 
 
@@ -151,6 +189,26 @@ movement_preview_path = []
 movement_preview_row = 0
 movement_preview_col = 0
 movement_steps_left = 0
+shove_mode = False
+shove_target = None
+shove_card_user = None
+shove_steps_left = 0
+
+# Enemy reaction state.
+# Enemies move one board tile at a time, which can open reaction windows.
+enemy_movement_queue = []
+enemy_movement_timer = 0
+enemy_movement_speed = 20
+reaction_mode = False
+reaction_enemy = None
+reaction_options = []
+damage_popups = []
+enemy_death_animations = []
+projectile_animations = []
+player_attack_animation = None
+pending_reward_after_deaths = False
+selected_enemy_for_movement = None
+enemy_movement_preview_tiles = []
 
 
 # Battle assets.
@@ -165,6 +223,303 @@ def apply_enemy_assets(enemies, enemy_assets):
         enemy["attack_frames"] = assets["attack_frames"]
         enemy["idle_frames_flipped"] = assets["idle_frames_flipped"]
         enemy["attack_frames_flipped"] = assets["attack_frames_flipped"]
+        enemy["death_frames"] = assets["death_frames"]
+        enemy["death_frames_flipped"] = assets["death_frames_flipped"]
+
+
+def get_reaction_protected_characters(party):
+    protected_characters = []
+
+    for character in party:
+        shield_target = character.get("shielding")
+
+        if shield_target is not None and shield_target["current_hp"] > 0:
+            protected_characters.append(shield_target)
+
+    return protected_characters
+
+
+def get_reaction_character_for_card(card, party, moving_enemy, current_energy):
+    protected_characters = get_reaction_protected_characters(party)
+
+    if protected_characters:
+        possible_characters = protected_characters
+    else:
+        possible_characters = party
+
+    if current_energy < get_reaction_cost(card):
+        return None
+
+    for character in possible_characters:
+        if character.get("shielding") is not None:
+            continue
+
+        if character.get("reaction_locked", 0) > 0:
+            continue
+
+        if not character_can_use_card(character, card):
+            continue
+
+        threatened_tiles = get_card_preview_tiles(card, character)
+
+        if (moving_enemy["row"], moving_enemy["col"]) in threatened_tiles:
+            return character
+
+    return None
+
+
+def get_reaction_options(player_hand, party, moving_enemy, current_energy):
+    reaction_options = []
+
+    for card_index, card in enumerate(player_hand):
+        if card["type"] != "attack":
+            continue
+
+        reaction_character = get_reaction_character_for_card(card, party, moving_enemy, current_energy)
+
+        if reaction_character is not None:
+            reaction_options.append({
+                "card_index": card_index,
+                "character": reaction_character
+            })
+
+    return reaction_options
+
+
+def get_reaction_option_for_card(reaction_options, card_index):
+    for reaction_option in reaction_options:
+        if reaction_option["card_index"] == card_index:
+            return reaction_option
+
+    return None
+
+
+def add_damage_popups_from_hits(hits, board_name):
+    if board_name == "enemy":
+        board_x = ENEMY_GRID_X
+    else:
+        board_x = PLAYER_GRID_X
+
+    for hit in hits:
+        target = hit["target"]
+        popup_x = board_x + target["col"] * (GRID_SIZE + GRID_GAP) + GRID_SIZE // 2
+        popup_y = GRID_Y + target["row"] * (GRID_SIZE + GRID_GAP) + 8
+        damage_popups.append(make_damage_popup(hit["damage"], popup_x, popup_y))
+
+
+def handle_card_feedback(card_result, acting_character):
+    global player_attack_animation
+
+    if not isinstance(card_result, dict):
+        return
+
+    player_attack_animation = make_player_attack_animation(acting_character)
+    hits = card_result.get("hits", [])
+
+    if not hits:
+        return
+
+    arrow_projectile = make_arrow_projectile(acting_character, hits, enemy_assets["arrow"])
+
+    if arrow_projectile is not None:
+        projectile_animations.append(arrow_projectile)
+
+    add_damage_popups_from_hits(hits, "enemy")
+    queue_enemy_death_animations(enemies, enemy_death_animations)
+    play_character_attack_sound(battle_sounds, acting_character)
+
+
+def apply_card_utility_result(card_result):
+    global current_energy
+
+    if not isinstance(card_result, dict):
+        return
+
+    if card_result.get("gain_energy", 0) > 0:
+        current_energy = min(max_energy, current_energy + card_result["gain_energy"])
+
+    if card_result.get("draw_cards", 0) > 0:
+        draw_cards(draw_pile, discard_pile, player_hand, card_result["draw_cards"])
+
+    for discard_count in range(card_result.get("discard_cards", 0)):
+        if not player_hand:
+            break
+
+        discarded_card = random.choice(player_hand)
+        player_hand.remove(discarded_card)
+        discard_pile.append(discarded_card)
+
+    if "trap" in card_result:
+        place_trap_on_enemy_grid(card_result["trap"], enemy_grid_data)
+
+
+def gain_block(character, amount):
+    character["block"] = character.get("block", 0) + amount
+
+
+def start_shove_mode(card_result, acting_character):
+    global shove_mode
+    global shove_target
+    global shove_card_user
+    global shove_steps_left
+
+    if not isinstance(card_result, dict) or "shove_target" not in card_result:
+        return False
+
+    shove_mode = True
+    shove_target = card_result["shove_target"]
+    shove_card_user = acting_character
+    shove_steps_left = card_result.get("push_range", 2)
+
+    return True
+
+
+def finish_shove():
+    global shove_mode
+    global shove_target
+    global shove_card_user
+    global shove_steps_left
+
+    trap_hits = []
+
+    if shove_target in enemies:
+        trap_hits = trigger_enemy_traps(shove_target, enemy_grid_data)
+
+    if trap_hits:
+        add_damage_popups_from_hits(trap_hits, "enemy")
+        queue_enemy_death_animations(enemies, enemy_death_animations)
+        handle_enemy_deaths(enemies, enemy_grid_data)
+        clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
+
+    shove_mode = False
+    shove_target = None
+    shove_card_user = None
+    shove_steps_left = 0
+
+    if len(enemies) == 0:
+        queue_reward_after_battle()
+
+
+def select_enemy_movement_preview(clicked_enemy):
+    global selected_enemy_for_movement
+    global enemy_movement_preview_tiles
+
+    selected_enemy_for_movement = clicked_enemy
+
+    if clicked_enemy is None:
+        enemy_movement_preview_tiles = []
+    else:
+        enemy_movement_preview_tiles = get_enemy_possible_movement_tiles(
+            clicked_enemy,
+            enemy_grid_data,
+            party
+        )
+
+
+def queue_reward_after_battle():
+    global current_state
+    global pending_reward_after_deaths
+    global reward_mode
+    global deck_scroll_y
+    global target_deck_scroll_y
+    global enemy_grid_data
+    global movement_mode
+    global movement_card
+    global movement_card_user
+    global movement_preview_path
+    global enemy_movement_queue
+    global reaction_mode
+    global reaction_enemy
+    global reaction_options
+    global map_layers
+    global current_map_layer
+
+    # Winning a battle clears warnings and opens rewards after any death animation finishes.
+    clear_incoming_attacks(player_grid_data)
+    enemy_grid_data = create_grid_data("enemy")
+    movement_mode = False
+    movement_card = None
+    movement_card_user = None
+    movement_preview_path = []
+    enemy_movement_queue = []
+    reaction_mode = False
+    reaction_enemy = None
+    reaction_options = []
+    reward_mode = "choose_reward"
+    deck_scroll_y = 0
+    target_deck_scroll_y = 0
+
+    if len(map_layers) == 0:
+        # The tutorial battle is fixed; the run map begins after it.
+        map_layers = generate_map()
+        current_map_layer = 0
+
+    if enemy_death_animations:
+        pending_reward_after_deaths = True
+    else:
+        current_state = REWARD
+
+
+def finish_enemy_actions():
+    next_state, next_turn = finish_enemy_turn(party, player_grid_data, enemies)
+
+    if next_state is not None:
+        return next_state, current_turn, current_energy
+
+    next_current_turn = current_turn
+    next_current_energy = current_energy
+
+    if next_turn is not None:
+        next_current_turn = next_turn
+        next_current_energy = max_energy
+        clear_party_shields(party)
+        for character in party:
+            character["block"] = 0
+        discard_pile.extend(player_hand)
+        player_hand.clear()
+        draw_cards(draw_pile, discard_pile, player_hand, 5)
+        discard_random_cards_for_status()
+        tick_enemy_turn_statuses(party)
+        tick_traps(enemy_grid_data)
+
+    return None, next_current_turn, next_current_energy
+
+
+def reset_battle_animation_state():
+    global player_attack_animation
+    global pending_reward_after_deaths
+    global shove_mode
+    global shove_target
+    global shove_card_user
+    global shove_steps_left
+    global selected_enemy_for_movement
+    global enemy_movement_preview_tiles
+
+    enemy_death_animations.clear()
+    projectile_animations.clear()
+    player_attack_animation = None
+    pending_reward_after_deaths = False
+    shove_mode = False
+    shove_target = None
+    shove_card_user = None
+    shove_steps_left = 0
+    selected_enemy_for_movement = None
+    enemy_movement_preview_tiles = []
+
+
+def discard_random_cards_for_status():
+    for character in party:
+        discards_to_make = character.get("random_discard_next_turn", 0)
+
+        for discard_index in range(discards_to_make):
+            if not player_hand:
+                break
+
+            discarded_card = random.choice(player_hand)
+            player_hand.remove(discarded_card)
+            discard_pile.append(discarded_card)
+
+        character["random_discard_next_turn"] = 0
 
 
 # Animation state.
@@ -217,6 +572,18 @@ while running:
                 if target_pile_scroll_y > max_scroll:
                     target_pile_scroll_y = max_scroll
         if event.type == pygame.KEYDOWN:
+            if current_state == BATTLE and reaction_mode:
+                if event.key == pygame.K_g:
+                    reaction_mode = False
+                    reaction_enemy = None
+                    reaction_options = []
+                    selected_card_index = None
+
+                continue
+
+            if current_state == BATTLE and pending_reward_after_deaths:
+                continue
+
             if current_state == BATTLE and current_turn == PLAYER_TURN:
                 selected_character = get_selected_character(party, selected_character_index)
 
@@ -231,6 +598,33 @@ while running:
                     movement_card = None
                     movement_card_user = None
                     movement_preview_path = []
+                    shove_mode = False
+                    shove_target = None
+                    shove_card_user = None
+                    shove_steps_left = 0
+                    clear_party_shields(party)
+
+                elif shove_mode:
+                    row_change = 0
+                    col_change = 0
+
+                    if event.key == pygame.K_LEFT:
+                        col_change = -1
+                    if event.key == pygame.K_RIGHT:
+                        col_change = 1
+                    if event.key == pygame.K_UP:
+                        row_change = -1
+                    if event.key == pygame.K_DOWN:
+                        row_change = 1
+
+                    if row_change != 0 or col_change != 0:
+                        while shove_steps_left > 0:
+                            if not move_unit(shove_target, enemy_grid_data, row_change, col_change):
+                                break
+
+                            shove_steps_left -= 1
+
+                        finish_shove()
 
                 elif movement_mode:
                     # Arrow keys build a planned movement path while in card movement mode.
@@ -297,6 +691,9 @@ while running:
                             movement_card_user["row"] = movement_preview_row
                             movement_card_user["col"] = movement_preview_col
                             player_grid_data[movement_card_user["row"]][movement_card_user["col"]]["unit"] = movement_card_user
+                            gain_block(movement_card_user, selected_card.get("block", 0))
+                            clear_shields_involving_character(party, movement_card_user)
+                            remove_broken_shields(party)
 
                             played_card = player_hand.pop(selected_card_index)
                             discard_pile.append(played_card)
@@ -335,39 +732,37 @@ while running:
                             )
 
                             if card_was_played:
+                                handle_card_feedback(card_result, selected_character)
+                                handle_enemy_deaths(enemies, enemy_grid_data)
                                 clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
-                                sync_enemy_grid(enemies, enemy_grid_data)
                                 played_card = player_hand.pop(selected_card_index)
                                 discard_pile.append(played_card)
                                 selected_card_index = None
+                                apply_card_utility_result(card_result)
+
+                                if start_shove_mode(card_result, selected_character):
+                                    continue
 
                                 if len(enemies) == 0:
-                                    # Winning a battle clears warnings and opens rewards before the map.
-                                    clear_incoming_attacks(player_grid_data)
-                                    enemy_grid_data = create_grid_data()
-                                    movement_mode = False
-                                    movement_card = None
-                                    movement_card_user = None
-                                    movement_preview_path = []
-                                    reward_mode = "choose_reward"
-                                    deck_scroll_y = 0
-                                    target_deck_scroll_y = 0
-                                    current_state = REWARD
-
-                                    if len(map_layers) == 0:
-                                        # The tutorial battle is fixed; the run map begins after it.
-                                        map_layers = generate_map()
-                                        current_map_layer = 0
+                                    queue_reward_after_battle()
 
                     # Temporary debug movement for the selected party member.
-                    if event.key == pygame.K_LEFT:
-                        move_unit(selected_character, player_grid_data, 0, -1)
-                    if event.key == pygame.K_RIGHT:
-                        move_unit(selected_character, player_grid_data, 0, 1)
-                    if event.key == pygame.K_UP:
-                        move_unit(selected_character, player_grid_data, -1, 0)
-                    if event.key == pygame.K_DOWN:
-                        move_unit(selected_character, player_grid_data, 1, 0)
+                    if event.key == pygame.K_LEFT and selected_character.get("snared", 0) == 0:
+                        if move_unit(selected_character, player_grid_data, 0, -1):
+                            clear_shields_involving_character(party, selected_character)
+                            remove_broken_shields(party)
+                    if event.key == pygame.K_RIGHT and selected_character.get("snared", 0) == 0:
+                        if move_unit(selected_character, player_grid_data, 0, 1):
+                            clear_shields_involving_character(party, selected_character)
+                            remove_broken_shields(party)
+                    if event.key == pygame.K_UP and selected_character.get("snared", 0) == 0:
+                        if move_unit(selected_character, player_grid_data, -1, 0):
+                            clear_shields_involving_character(party, selected_character)
+                            remove_broken_shields(party)
+                    if event.key == pygame.K_DOWN and selected_character.get("snared", 0) == 0:
+                        if move_unit(selected_character, player_grid_data, 1, 0):
+                            clear_shields_involving_character(party, selected_character)
+                            remove_broken_shields(party)
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if current_state == HOME_MENU:
@@ -385,7 +780,8 @@ while running:
                     selected_character_index = 0
                     selected_character = get_selected_character(party, selected_character_index)
 
-                    player_grid_data = create_grid_data()
+                    player_grid_data = create_grid_data("player")
+                    enemy_grid_data = create_grid_data("enemy")
                     place_party_on_grid(party, player_grid_data, True)
 
                     player_deck = build_starting_deck(party)
@@ -399,6 +795,11 @@ while running:
                     movement_mode = False
                     movement_card = None
                     movement_preview_path = []
+                    enemy_movement_queue = []
+                    reaction_mode = False
+                    reaction_enemy = None
+                    reaction_options = []
+                    reset_battle_animation_state()
 
                     current_state = BATTLE
                     battle_number = 1
@@ -409,6 +810,49 @@ while running:
 
             if current_state == BATTLE:
                 # Battle clicks either select cards, confirm movement, play cards, or end turn.
+                if pending_reward_after_deaths:
+                    continue
+
+                if shove_mode:
+                    continue
+
+                if reaction_mode:
+                    clicked_card_index = get_clicked_card_index(player_hand, event.pos)
+                    reaction_option = get_reaction_option_for_card(reaction_options, clicked_card_index)
+
+                    if reaction_option is not None:
+                        selected_card = player_hand[clicked_card_index]
+                        reaction_character = reaction_option["character"]
+                        card_was_played, current_energy, card_result = play_reaction_card(
+                            selected_card,
+                            reaction_character,
+                            enemies,
+                            current_energy
+                        )
+
+                        if card_was_played:
+                            handle_card_feedback(card_result, reaction_character)
+                            handle_enemy_deaths(enemies, enemy_grid_data)
+                            clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
+                            played_card = player_hand.pop(clicked_card_index)
+                            discard_pile.append(played_card)
+                            selected_card_index = None
+
+                            if reaction_enemy not in enemies:
+                                enemy_movement_queue = [
+                                    movement_step for movement_step in enemy_movement_queue
+                                    if movement_step["enemy"] is not reaction_enemy
+                                ]
+
+                            reaction_mode = False
+                            reaction_enemy = None
+                            reaction_options = []
+
+                            if len(enemies) == 0:
+                                queue_reward_after_battle()
+
+                    continue
+
                 if pile_view_title is not None:
                     if get_pile_view_close_clicked(event.pos):
                         pile_view_title = None
@@ -433,6 +877,33 @@ while running:
                     pile_view_cards = discard_pile.copy()
                     pile_scroll_y = 0
                     target_pile_scroll_y = 0
+                    selected_card_index = None
+                    continue
+
+                selected_character = get_selected_character(party, selected_character_index)
+                shield_button_rect = get_shield_button_rect(party, selected_character)
+                clicked_enemy = get_clicked_enemy(enemies, event.pos)
+
+                if clicked_enemy is not None:
+                    select_enemy_movement_preview(clicked_enemy)
+                    selected_card_index = None
+                    continue
+                elif event.pos[0] >= ENEMY_GRID_X and event.pos[1] >= GRID_Y:
+                    select_enemy_movement_preview(None)
+
+                if (
+                    shield_button_rect is not None
+                    and shield_button_rect.collidepoint(event.pos)
+                    and current_turn == PLAYER_TURN
+                    and not movement_mode
+                ):
+                    shield_target = get_shield_target(party, selected_character)
+                    already_shielding = selected_character.get("shielding") is shield_target
+                    clear_party_shields(party)
+
+                    if not already_shielding:
+                        selected_character["shielding"] = shield_target
+
                     selected_card_index = None
                     continue
 
@@ -496,6 +967,9 @@ while running:
                         movement_card_user["row"] = movement_preview_row
                         movement_card_user["col"] = movement_preview_col
                         player_grid_data[movement_card_user["row"]][movement_card_user["col"]]["unit"] = movement_card_user
+                        gain_block(movement_card_user, selected_card.get("block", 0))
+                        clear_shields_involving_character(party, movement_card_user)
+                        remove_broken_shields(party)
 
                         played_card = player_hand.pop(selected_card_index)
                         discard_pile.append(played_card)
@@ -533,58 +1007,38 @@ while running:
                         )
 
                         if card_was_played:
+                            handle_card_feedback(card_result, selected_character)
+                            handle_enemy_deaths(enemies, enemy_grid_data)
                             clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
-                            sync_enemy_grid(enemies, enemy_grid_data)
                             played_card = player_hand.pop(selected_card_index)
                             discard_pile.append(played_card)
                             selected_card_index = None
+                            apply_card_utility_result(card_result)
+
+                            if start_shove_mode(card_result, selected_character):
+                                continue
+
                             if len(enemies) == 0:
-                                # Winning a battle clears warnings and opens rewards before the map.
-                                clear_incoming_attacks(player_grid_data)
-                                enemy_grid_data = create_grid_data()
-                                selected_card_index = None
-                                movement_mode = False
-                                movement_card = None
-                                movement_preview_path = []
-                                reward_mode = "choose_reward"
-                                deck_scroll_y = 0
-                                target_deck_scroll_y = 0
-                                current_state = REWARD
-
-                                if len(map_layers) == 0:
-                                    # The tutorial battle is fixed; the run map begins after it.
-                                    map_layers = generate_map()
-                                    current_map_layer = 0
+                                queue_reward_after_battle()
 
 
-                if end_turn_button.is_clicked(event.pos) and current_turn == PLAYER_TURN and not movement_mode:
-                    # End of player turn: unplayed cards go to discard.
-                    discard_pile.extend(player_hand)
-                    player_hand.clear()
-
+                if end_turn_button.is_clicked(event.pos) and current_turn == PLAYER_TURN and not movement_mode and not shove_mode:
+                    # Keep the hand through enemy movement so attack cards can react.
+                    tick_party_statuses(party)
                     current_turn = ENEMY_TURN
                     enemy_is_attacking = True
                     attacking_enemy_index = get_next_attacking_enemy_index(enemies, -1)
                     selected_card_index = None
                     enemy_attack_frame_index = 0
                     enemy_attack_timer = 0
+                    reaction_mode = False
+                    reaction_enemy = None
+                    reaction_options = []
 
                     if attacking_enemy_index is None:
                         enemy_is_attacking = False
-                        next_state, next_turn = finish_enemy_attack(
-                            party,
-                            player_grid_data,
-                            enemy_grid_data,
-                            enemies
-                        )
-
-                        if next_state is not None:
-                            current_state = next_state
-
-                        if next_turn is not None:
-                            current_turn = next_turn
-                            current_energy = max_energy
-                            draw_cards(draw_pile, discard_pile, player_hand, 5)
+                        enemy_movement_queue = build_enemy_movement_queue(enemies, enemy_grid_data, party)
+                        enemy_movement_timer = 0
             if current_state == MAP:
                 clicked_node = get_clicked_map_node(map_layers, event.pos)
 
@@ -594,15 +1048,15 @@ while running:
 
                     if clicked_node["type"] == "battle" or clicked_node["type"] == "boss":
                         # Starting a map battle rebuilds grids and reshuffles the whole deck.
-                        player_grid_data = create_grid_data()
-                        enemy_grid_data = create_grid_data()
+                        player_grid_data = create_grid_data("player")
+                        enemy_grid_data = create_grid_data("enemy")
                         enemies.clear()
 
                         place_party_on_grid(party, player_grid_data)
                         selected_character = get_selected_character(party, selected_character_index)
 
                         battle_number += 1
-                        start_map_battle(enemies, enemy_grid_data, battle_number)
+                        last_battle_room = start_map_battle(enemies, enemy_grid_data, last_battle_room)
                         apply_enemy_assets(enemies, enemy_assets)
                         prepare_enemy_attacks(enemies, player_grid_data)
 
@@ -611,6 +1065,11 @@ while running:
                         movement_card = None
                         movement_card_user = None
                         movement_preview_path = []
+                        enemy_movement_queue = []
+                        reaction_mode = False
+                        reaction_enemy = None
+                        reaction_options = []
+                        reset_battle_animation_state()
                         discard_pile.extend(player_hand)
                         player_hand.clear()
                         discard_pile.extend(draw_pile)
@@ -682,8 +1141,8 @@ while running:
                     party = []
                     selected_character = None
                     selected_character_index = 0
-                    player_grid_data = create_grid_data()
-                    enemy_grid_data = create_grid_data()
+                    player_grid_data = create_grid_data("player")
+                    enemy_grid_data = create_grid_data("enemy")
                     enemies.clear()
 
                     selected_card_index = None
@@ -691,17 +1150,32 @@ while running:
                     movement_card = None
                     movement_card_user = None
                     movement_preview_path = []
+                    enemy_movement_queue = []
+                    reaction_mode = False
+                    reaction_enemy = None
+                    reaction_options = []
                     map_layers = []
+                    reset_battle_animation_state()
 
                     current_turn = PLAYER_TURN
                     current_state = CHARACTER_SELECT
                     battle_number = 0
+                    last_battle_room = None
 
                 if game_over_quit_button.is_clicked(event.pos):
                     running = False
 
     deck_scroll_y += (target_deck_scroll_y - deck_scroll_y) * 0.2
     pile_scroll_y += (target_pile_scroll_y - pile_scroll_y) * 0.2
+    update_damage_popups(damage_popups)
+    update_enemy_death_animations(enemy_death_animations)
+    update_projectile_animations(projectile_animations)
+    update_party_death_animations(party)
+    player_attack_animation = update_player_attack_animation(player_attack_animation)
+
+    if pending_reward_after_deaths and not enemy_death_animations:
+        pending_reward_after_deaths = False
+        current_state = REWARD
 
     screen.fill(DARK_BG)
 
@@ -751,7 +1225,9 @@ while running:
 
                 if enemy_attack_frame_index >= len(attack_frames):
                     attacking_enemy = enemies[attacking_enemy_index]
-                    resolve_enemy_incoming_attacks(attacking_enemy, party, player_grid_data)
+                    enemy_hits = resolve_enemy_incoming_attacks(attacking_enemy, party, player_grid_data)
+                    add_damage_popups_from_hits(enemy_hits, "player")
+                    start_player_death_animations_from_hits(enemy_hits)
                     clear_enemy_incoming_attacks(attacking_enemy, player_grid_data)
 
                     if all(character["current_hp"] <= 0 for character in party):
@@ -764,21 +1240,80 @@ while running:
 
                         if attacking_enemy_index is None:
                             enemy_is_attacking = False
+                            enemy_movement_queue = build_enemy_movement_queue(enemies, enemy_grid_data, party)
+                            enemy_movement_timer = 0
 
-                            next_state, next_turn = finish_enemy_attack(
+        if current_turn == ENEMY_TURN and not enemy_is_attacking and current_state == BATTLE:
+            if reaction_mode:
+                pass
+            elif enemy_movement_queue:
+                enemy_movement_timer += 1
+
+                if enemy_movement_timer >= enemy_movement_speed:
+                    enemy_movement_timer = 0
+                    movement_step = enemy_movement_queue.pop(0)
+                    moving_enemy = movement_step["enemy"]
+
+                    if moving_enemy in enemies:
+                        enemy_moved = move_unit(
+                            moving_enemy,
+                            enemy_grid_data,
+                            movement_step["row_change"],
+                            movement_step["col_change"]
+                        )
+
+                        if enemy_moved and selected_enemy_for_movement is moving_enemy:
+                            select_enemy_movement_preview(moving_enemy)
+
+                        if not enemy_moved:
+                            enemy_movement_queue = [
+                                queued_step for queued_step in enemy_movement_queue
+                                if queued_step["enemy"] is not moving_enemy
+                            ]
+
+                        if enemy_moved:
+                            trap_hits = trigger_enemy_traps(moving_enemy, enemy_grid_data)
+
+                            if trap_hits:
+                                add_damage_popups_from_hits(trap_hits, "enemy")
+                                queue_enemy_death_animations(enemies, enemy_death_animations)
+                                handle_enemy_deaths(enemies, enemy_grid_data)
+                                if selected_enemy_for_movement not in enemies:
+                                    select_enemy_movement_preview(None)
+                                elif selected_enemy_for_movement is not None:
+                                    select_enemy_movement_preview(selected_enemy_for_movement)
+                                clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
+
+                                if moving_enemy not in enemies:
+                                    enemy_movement_queue = [
+                                        queued_step for queued_step in enemy_movement_queue
+                                        if queued_step["enemy"] is not moving_enemy
+                                    ]
+
+                                    if len(enemies) == 0:
+                                        queue_reward_after_battle()
+
+                                    continue
+
+                            reaction_options = get_reaction_options(
+                                player_hand,
                                 party,
-                                player_grid_data,
-                                enemy_grid_data,
-                                enemies
+                                moving_enemy,
+                                current_energy
                             )
 
-                            if next_state is not None:
-                                current_state = next_state
+                            if reaction_options:
+                                reaction_mode = True
+                                reaction_enemy = moving_enemy
+                                selected_card_index = None
+            else:
+                next_state, next_turn, next_energy = finish_enemy_actions()
 
-                            if next_turn is not None:
-                                current_turn = next_turn
-                                current_energy = max_energy
-                                draw_cards(draw_pile, discard_pile, player_hand, 5)
+                if next_state is not None:
+                    current_state = next_state
+
+                current_turn = next_turn
+                current_energy = next_energy
 
     if current_state == BATTLE or current_state == GAME_OVER:
         # Draw the battle underneath game-over so the loss still has context.
@@ -810,25 +1345,57 @@ while running:
             current_energy,
             max_energy,
             player_grid_data,
+            enemy_grid_data,
             enemies,
             player_idle_frame_index,
             enemy_idle_frame_index,
             enemy_attack_frame_index,
             enemy_is_attacking,
             attacking_enemy_index,
+            player_attack_animation,
             enemy_assets["counter"],
             player_preview_tiles,
-            enemy_preview_tiles
+            enemy_preview_tiles,
+            enemy_movement_preview_tiles
         )
 
+        draw_enemy_death_animations(screen, enemy_death_animations)
+        draw_projectile_animations(screen, projectile_animations)
+        draw_damage_popups(screen, damage_popups)
+
         mouse_pos = pygame.mouse.get_pos()
-        draw_card_hand(screen, player_hand, mouse_pos, selected_card_index, selected_character, small_font)
+        draw_enemy_hover_tooltip(screen, small_font, enemies, mouse_pos)
+        reaction_card_indices = []
+
+        if reaction_mode:
+            draw_reaction_warning_edges(screen)
+            reaction_card_indices = [
+                reaction_option["card_index"] for reaction_option in reaction_options
+            ]
+
+        draw_card_hand(
+            screen,
+            player_hand,
+            mouse_pos,
+            selected_card_index,
+            selected_character,
+            small_font,
+            reaction_card_indices
+        )
         draw_pile_buttons(screen, small_font, len(draw_pile), len(discard_pile))
 
         if movement_mode:
             confirm_text = font.render("Choose movement, then press E or Play Card", True, WHITE)
 
             screen.blit(confirm_text, (360, 720))
+
+        if shove_mode:
+            shove_text = font.render("Choose shove direction with arrow keys", True, WHITE)
+            screen.blit(shove_text, (360, 720))
+
+        if reaction_mode:
+            reaction_text = font.render("Reaction! Click a red card or press G", True, WHITE)
+            screen.blit(reaction_text, (310, 720))
 
         if current_state == GAME_OVER:
             draw_game_over_menu(screen, font, play_again_button, game_over_quit_button)

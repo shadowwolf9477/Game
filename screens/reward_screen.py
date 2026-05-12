@@ -1,8 +1,7 @@
 import pygame
 
 from settings import SLEEVE_BLUE, WHITE
-from cards.card_effects import get_card_display_name
-from cards.card_renderer import card_has_sleeve, draw_sleeve_outline, get_card_image
+from cards.card_renderer import card_has_sleeve, draw_sleeve_outline, get_composed_card_image
 
 
 def draw_reward_screen(screen, font, small_font, reward_mode, card_reward_choices, player_deck, deck_scroll_y, selected_sleeve, can_apply_sleeve):
@@ -27,24 +26,8 @@ def draw_reward_screen(screen, font, small_font, reward_mode, card_reward_choice
         screen.blit(info_text, (450, 175))
         for index, card in enumerate(card_reward_choices):
             card_x, card_y, card_rect = get_card_reward_rect(index)
-            if "image_path" in card:
-                card_image = get_card_image(card["image_path"], (170, 220))
-                screen.blit(card_image, (card_x, card_y))
-            else:
-                pygame.draw.rect(screen, (45, 45, 60), card_rect)
-
-                name_text = small_font.render(get_card_display_name(card, None), True, WHITE)
-                screen.blit(name_text, (card_x + 8, card_y + 10))
-
-                cost_text = small_font.render("Cost " + str(card["cost"]), True, WHITE)
-                screen.blit(cost_text, (card_x + 8, card_y + 45))
-
-                rarity_text = small_font.render(card["rarity"], True, WHITE)
-                screen.blit(rarity_text, (card_x + 8, card_y + 80))
-
-                if "damage" in card:
-                    damage_text = small_font.render("Dmg " + str(card["damage"]), True, WHITE)
-                    screen.blit(damage_text, (card_x + 8, card_y + 115))
+            card_image = get_composed_card_image(card, None, card_rect.size)
+            screen.blit(card_image, (card_x, card_y))
 
             pygame.draw.rect(screen, WHITE, card_rect, 3)
 
@@ -66,12 +49,8 @@ def draw_reward_screen(screen, font, small_font, reward_mode, card_reward_choice
                 continue
 
             valid = can_apply_sleeve(selected_sleeve, card)
-
-            if "image_path" in card:
-                card_image = get_card_image(card["image_path"], (150, 180))
-                screen.blit(card_image, (card_x, card_y))
-            else:
-                pygame.draw.rect(screen, (45, 45, 60), card_rect)
+            card_image = get_composed_card_image(card, None, card_rect.size)
+            screen.blit(card_image, (card_x, card_y))
 
             if valid:
                 pygame.draw.rect(screen, WHITE, card_rect, 3)
@@ -82,20 +61,6 @@ def draw_reward_screen(screen, font, small_font, reward_mode, card_reward_choice
                 draw_sleeve_outline(screen, card_rect)
                 sleeve_text = small_font.render("Sleeved", True, SLEEVE_BLUE)
                 screen.blit(sleeve_text, (card_x + 8, card_y + 145))
-
-            if "image_path" not in card:
-                name_text = small_font.render(get_card_display_name(card, None), True, WHITE)
-                screen.blit(name_text, (card_x + 8, card_y + 10))
-
-                cost_text = small_font.render("Cost " + str(card["cost"]), True, WHITE)
-                screen.blit(cost_text, (card_x + 8, card_y + 45))
-
-                thick_text = small_font.render("Thick " + str(card["thickness"]), True, WHITE)
-                screen.blit(thick_text, (card_x + 8, card_y + 80))
-
-                if "damage" in card:
-                    damage_text = small_font.render("Dmg " + str(card["damage"]), True, WHITE)
-                    screen.blit(damage_text, (card_x + 8, card_y + 115))
 
 
 def get_reward_choice_click(mouse_pos):

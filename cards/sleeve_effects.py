@@ -1,6 +1,6 @@
 def apply_premium_sleeve(card):
     # Premium Sleeve makes one attack card stronger but heavier to play/draw.
-    card["damage"] += 1
+    card["damage"] += 5
     card["cost"] += 1
     card["thickness"] += 0.5
     card.setdefault("sleeves", []).append("Premium Sleeve")
