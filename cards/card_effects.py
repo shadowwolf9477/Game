@@ -100,7 +100,7 @@ def play_pierce_row(card, selected_character, enemies):
     hits = []
     target_columns = []
 
-    for distance in range(attack_range):
+    for distance in range(1,attack_range+1):
         enemy_col = selected_character["col"] + distance
 
         if enemy_col < GRID_COLS:
