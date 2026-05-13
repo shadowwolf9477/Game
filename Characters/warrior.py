@@ -5,7 +5,7 @@ warrior = {
     "max_hp": 40,
     "current_hp": 40,
     "starting_row": 2,
-    "starting_col": 2,
+    "starting_col": 0,
     "tags": ["melee", "tank"],
     "passive": "guardian",
     "basic_attack_shape": "vertical_slash",

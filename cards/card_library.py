@@ -25,6 +25,10 @@ CARD_LIBRARY = {
         "usable_tags": ["ranged", "melee"],
         # Characters read the same range differently: Archer shoots a row, Warrior slashes lanes.
         "range": 2,
+        "character_damage": {
+            "Archer": 4,
+            "Warrior": 7
+        },
         "description": "Use this character's basic attack shape.",
         "image_path": "assets/card_templtes/card art/bow_shot.jpg",
         "character_image_paths": {
@@ -43,13 +47,13 @@ CARD_LIBRARY = {
         "thickness": 0.5,
         "type": "attack",
         "effect": "pierce_row",
-        "damage": 10,
+        "damage": 9,
         "rarity": "rare",
         # Pierce hits more than one enemy, but still respects the player's row.
         "max_targets": 2,
-        "range": "player_row",
+        "range": 3,
         "usable_characters": ["Archer"],
-        "description": "Pierce your row. Hit up to 2 enemies.",
+        "description": "Pierce 3 tiles in your row. Hit up to 2 enemies.",
         "image_path": "assets/card_templtes/card art/bow_shot.jpg"
     },
 
@@ -60,9 +64,9 @@ CARD_LIBRARY = {
         "thickness": 0.5,
         "type": "attack",
         "effect": "cleave_column",
-        "damage": 10,
+        "damage": 15,
         "usable_characters": ["Warrior"],
-        "description": "Cleave a column. Hit every enemy in that column.",
+        "description": "Choose left or right. Split this card's damage across enemies in the swing.",
         "image_path": "assets/card_templtes/card art/Cleave.jpg"
     },
 
@@ -75,7 +79,8 @@ CARD_LIBRARY = {
         "effect": "move",
         "move_range": 1,
         "block": 10,
-        "description": "Move 1 tile. Gain 10 block."
+        "description": "Move 1 tile. Gain 10 block.",
+        "image_path": "assets/card_templtes/card art/gaurd_step.webp"
     },
 
     "deep_breath": {
@@ -88,7 +93,8 @@ CARD_LIBRARY = {
         "gain_energy": 1,
         "draw_cards": 1,
         "discard_cards": 1,
-        "description": "Gain 1 energy. Draw 1 card. Discard 1 card."
+        "description": "Gain 1 energy. Discard 1 card. Draw 1 card.",
+        "image_path": "assets/card_templtes/card art/deep_breaths.webp"
     },
 
     "shove": {
@@ -99,7 +105,8 @@ CARD_LIBRARY = {
         "rarity": "uncommon",
         "effect": "shove",
         "push_range": 2,
-        "description": "Choose a direction. Push the first enemy in your row 2 tiles."
+        "description": "Push the enemy directly ahead 2 tiles.",
+        "image_path": "assets/card_templtes/card art/Shove.webp"
     },
 
     "snare_trap": {
@@ -112,7 +119,8 @@ CARD_LIBRARY = {
         "trap_damage": 1,
         "trap_duration": 4,
         "trap_radius": 1,
-        "description": "Set a trap on the enemy board. Radius 1. Lasts 4 turns."
+        "description": "Set a trap on the enemy board. Radius 1. Lasts 4 turns.",
+        "image_path": "assets/card_templtes/card art/Snare_trap.png"
     }
 
 }

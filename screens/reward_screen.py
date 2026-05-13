@@ -60,7 +60,7 @@ def draw_reward_screen(screen, font, small_font, reward_mode, card_reward_choice
             if card_has_sleeve(card):
                 draw_sleeve_outline(screen, card_rect)
                 sleeve_text = small_font.render("Sleeved", True, SLEEVE_BLUE)
-                screen.blit(sleeve_text, (card_x + 8, card_y + 145))
+                screen.blit(sleeve_text, (card_x + 8, card_y + card_rect.height - 35))
 
 
 def get_reward_choice_click(mouse_pos):
@@ -100,9 +100,9 @@ def get_clicked_card_reward(card_reward_choices, mouse_pos):
 
 
 def get_reward_card_rect(index, deck_scroll_y):
-    card_x = 150 + (index % 4) * 235
-    card_y = 250 + (index // 4) * 220 - deck_scroll_y
-    card_rect = pygame.Rect(card_x, card_y, 150, 180)
+    card_x = 110 + (index % 4) * 260
+    card_y = 250 + (index // 4) * 260 - deck_scroll_y
+    card_rect = pygame.Rect(card_x, card_y, 180, 230)
 
     return card_x, card_y, card_rect
 

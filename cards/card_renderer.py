@@ -196,7 +196,7 @@ def build_card_description(card, character):
         return description
 
     if card["effect"] == "deep_breath":
-        return "Gain 1 energy. Draw 1 card. Discard 1 card."
+        return "Gain 1 energy. Discard 1 card. Draw 1 card."
 
     if card["effect"] == "shove":
         return "Push the first enemy in your row " + str(card.get("push_range", 2)) + " tiles."
@@ -205,16 +205,18 @@ def build_card_description(card, character):
         return "Set a radius " + str(card.get("trap_radius", 1)) + " trap for " + str(card.get("trap_duration", 4)) + " turns."
 
     if card["effect"] == "pierce_row":
-        return "Deal " + str(card["damage"]) + " damage. Hits up to " + str(card["max_targets"]) + " enemies in your row."
+        return "Deal " + str(card["damage"]) + " damage. Range " + str(card.get("range", 3)) + ". Hits up to " + str(card["max_targets"]) + "."
 
     if card["effect"] == "cleave_column":
-        return "Deal " + str(card["damage"]) + " damage to every enemy in your column."
+        return "Choose left or right. Split " + str(card["damage"]) + " damage across the swing."
 
     if card["effect"] == "basic_attack":
         if character is not None and character.get("name") == "Warrior":
-            return "Deal " + str(card["damage"]) + " damage. Slash 2 tiles in your column. Hits 1 enemy."
+            damage = card.get("character_damage", {}).get("Warrior", card["damage"])
+            return "Deal " + str(damage) + " damage in the faced direction. Hits 1 enemy."
 
-        return "Deal " + str(card["damage"]) + " damage. Range " + str(card["range"]) + ". Hits 1 enemy."
+        damage = card.get("character_damage", {}).get("Archer", card["damage"])
+        return "Deal " + str(damage) + " damage. Range " + str(card["range"]) + " in faced direction. Hits 1."
 
     return card.get("description", "")
 

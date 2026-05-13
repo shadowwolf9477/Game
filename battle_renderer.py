@@ -22,6 +22,38 @@ from party_manager import get_shield_button_rect, get_shield_target
 ENERGY_BAR_CACHE = {}
 ENERGY_BAR_SOURCE_RECT = pygame.Rect(0, 20, 98, 16)
 ENERGY_BAR_SCALE = 2
+STATUS_ICON_CACHE = {}
+STATUS_ICON_SIZE = 24
+STATUS_DEFINITIONS = [
+    {
+        "key": "snared",
+        "name": "Snared",
+        "path": "assets/Status_effects/Icon_Entangled.webp",
+        "description": "This character cannot move.",
+        "remaining_label": "Turns left"
+    },
+    {
+        "key": "reaction_locked",
+        "name": "Reaction Locked",
+        "path": "assets/Status_effects/Icon_Shackled.webp",
+        "description": "This character cannot use reaction attacks.",
+        "remaining_label": "Enemy turns left"
+    },
+    {
+        "key": "random_discard_next_turn",
+        "name": "Random Discard",
+        "path": "assets/Status_effects/Icon_NoDraw.webp",
+        "description": "At the next player turn, discard this many random cards.",
+        "remaining_label": "Cards to discard"
+    },
+    {
+        "key": "weak_attacks",
+        "name": "Weak Attacks",
+        "path": "assets/Status_effects/Icon_Frail.webp",
+        "description": "This character's next attacks deal 50% less damage.",
+        "remaining_label": "Attacks left"
+    }
+]
 
 
 def render_outlined_text(font, text, text_color, outline_color=(0, 0, 0)):
@@ -57,23 +89,124 @@ def get_energy_bar_image(image_path):
     return ENERGY_BAR_CACHE[image_path]
 
 
+def get_status_icon(image_path):
+    if image_path not in STATUS_ICON_CACHE:
+        icon = pygame.image.load(asset_path(image_path)).convert_alpha()
+        icon = pygame.transform.smoothscale(icon, (STATUS_ICON_SIZE, STATUS_ICON_SIZE))
+        STATUS_ICON_CACHE[image_path] = icon
+
+    return STATUS_ICON_CACHE[image_path]
+
+
 def draw_energy_bar(screen, current_energy, max_energy, x, y):
-    # Draw an empty bar, then clip the filled bar to match current energy.
+    # Each bar holds max_energy. Extra energy spills into another bar.
     empty_bar = get_energy_bar_image("assets/UI_BARS/empty_bar.png")
     filled_bar = get_energy_bar_image("assets/UI_BARS/energy_bar.png")
-
-    screen.blit(empty_bar, (x, y))
 
     if max_energy <= 0:
         return
 
-    energy_ratio = current_energy / max_energy
-    energy_ratio = max(0, min(energy_ratio, 1))
-    filled_width = int(filled_bar.get_width() * energy_ratio)
+    visible_bar_count = max(1, (max(0, current_energy) + max_energy - 1) // max_energy)
+    bar_gap = 4
 
-    if filled_width > 0:
-        filled_area = pygame.Rect(0, 0, filled_width, filled_bar.get_height())
-        screen.blit(filled_bar, (x, y), filled_area)
+    for bar_index in range(visible_bar_count):
+        bar_y = y + bar_index * (empty_bar.get_height() + bar_gap)
+        energy_in_bar = current_energy - bar_index * max_energy
+        energy_ratio = energy_in_bar / max_energy
+        energy_ratio = max(0, min(energy_ratio, 1))
+        filled_width = int(filled_bar.get_width() * energy_ratio)
+
+        screen.blit(empty_bar, (x, bar_y))
+
+        if filled_width > 0:
+            filled_area = pygame.Rect(0, 0, filled_width, filled_bar.get_height())
+            screen.blit(filled_bar, (x, bar_y), filled_area)
+
+
+def get_character_active_statuses(character):
+    active_statuses = []
+
+    for status_definition in STATUS_DEFINITIONS:
+        value = character.get(status_definition["key"], 0)
+
+        if value > 0:
+            active_status = status_definition.copy()
+            active_status["value"] = value
+            active_statuses.append(active_status)
+
+    return active_statuses
+
+
+def draw_character_status_icons(screen, character, tile_x, tile_y):
+    active_statuses = get_character_active_statuses(character)
+    hovered_status = None
+
+    if not active_statuses:
+        return None
+
+    mouse_pos = pygame.mouse.get_pos()
+    icon_gap = 4
+    total_width = len(active_statuses) * STATUS_ICON_SIZE + (len(active_statuses) - 1) * icon_gap
+    start_x = tile_x + (GRID_SIZE - total_width) // 2
+    icon_y = tile_y + GRID_SIZE - STATUS_ICON_SIZE - 4
+    count_font = pygame.font.Font(None, 20)
+
+    for index, status in enumerate(active_statuses):
+        icon_x = start_x + index * (STATUS_ICON_SIZE + icon_gap)
+        icon_rect = pygame.Rect(icon_x, icon_y, STATUS_ICON_SIZE, STATUS_ICON_SIZE)
+        icon = get_status_icon(status["path"])
+
+        backing_rect = icon_rect.inflate(4, 4)
+        backing = pygame.Surface(backing_rect.size, pygame.SRCALPHA)
+        backing.fill((15, 15, 22, 135))
+        screen.blit(backing, backing_rect)
+        screen.blit(icon, icon_rect)
+
+        value_text = render_outlined_text(count_font, str(status["value"]), WHITE)
+        value_rect = value_text.get_rect(bottomright=(icon_rect.right + 3, icon_rect.bottom + 3))
+        screen.blit(value_text, value_rect)
+
+        if icon_rect.collidepoint(mouse_pos):
+            hovered_status = {
+                "status": status,
+                "rect": icon_rect
+            }
+
+    return hovered_status
+
+
+def draw_status_tooltip(screen, font, hovered_status):
+    if hovered_status is None:
+        return
+
+    status = hovered_status["status"]
+    icon_rect = hovered_status["rect"]
+    lines = [
+        status["name"],
+        status["description"],
+        status["remaining_label"] + ": " + str(status["value"])
+    ]
+
+    padding = 8
+    rendered_lines = [font.render(line, True, WHITE) for line in lines]
+    tooltip_width = max(line.get_width() for line in rendered_lines) + padding * 2
+    tooltip_height = len(rendered_lines) * font.get_height() + padding * 2
+    tooltip_x = icon_rect.centerx - tooltip_width // 2
+    tooltip_y = icon_rect.y - tooltip_height - 8
+
+    if tooltip_x < 8:
+        tooltip_x = 8
+    if tooltip_x + tooltip_width > SCREEN_WIDTH - 8:
+        tooltip_x = SCREEN_WIDTH - tooltip_width - 8
+    if tooltip_y < 8:
+        tooltip_y = icon_rect.bottom + 8
+
+    tooltip_rect = pygame.Rect(tooltip_x, tooltip_y, tooltip_width, tooltip_height)
+    pygame.draw.rect(screen, (20, 18, 28), tooltip_rect)
+    pygame.draw.rect(screen, WHITE, tooltip_rect, 2)
+
+    for index, rendered_line in enumerate(rendered_lines):
+        screen.blit(rendered_line, (tooltip_rect.x + padding, tooltip_rect.y + padding + index * font.get_height()))
 
 
 def draw_battle(
@@ -135,6 +268,8 @@ def draw_battle(
         player_preview_tiles
     )
 
+    hovered_status = None
+
     for character in party:
         player_x = PLAYER_GRID_X + character["col"] * (GRID_SIZE + GRID_GAP)
         player_y = GRID_Y + character["row"] * (GRID_SIZE + GRID_GAP)
@@ -176,8 +311,13 @@ def draw_battle(
         player_draw_x += attack_draw_offset_x
         player_draw_y = player_y - (player_image.get_height() - GRID_SIZE)
         screen.blit(player_image, (player_draw_x, player_draw_y))
+        character_hovered_status = draw_character_status_icons(screen, character, player_x, player_y)
+
+        if character_hovered_status is not None:
+            hovered_status = character_hovered_status
 
     draw_occupied_attack_damage_labels(screen, PLAYER_GRID_X, GRID_Y, player_grid_data)
+    draw_status_tooltip(screen, pygame.font.Font(None, 26), hovered_status)
 
     draw_shield_button(screen, font, party, selected_character)
 

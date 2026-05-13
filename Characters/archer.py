@@ -6,7 +6,7 @@ archer = {
     "max_hp": 25,
     "current_hp": 25,
     "starting_row": 1,
-    "starting_col": 2,
+    "starting_col": 0,
     "tags": ["ranged"],
     "passive": "reaction_bonus",
     "basic_attack_shape": "row_shot",
