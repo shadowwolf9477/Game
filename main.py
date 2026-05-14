@@ -53,10 +53,11 @@ from battle_setup import (
     place_trap_on_enemy_grid,
     trigger_enemy_traps,
     tick_traps,
-    get_enemy_possible_movement_tiles
+    get_enemy_possible_movement_tiles,
+    process_enemy_end_of_turn_fire
 )
 from maps.map_loader import generate_map
-from screens.map_screen import draw_map_screen, get_clicked_map_node, complete_map_node
+from screens.map_screen import draw_map_screen, get_clicked_map_node, complete_map_node, scroll_map
 from screens.reward_screen import (
     draw_reward_screen,
     get_reward_choice_click,
@@ -923,6 +924,10 @@ def apply_card_utility_result(card_result):
 
     if "trap" in card_result:
         place_trap_on_enemy_grid(card_result["trap"], enemy_grid_data)
+ 
+    if "traps" in card_result:
+        for trap in card_result["traps"]:
+            place_trap_on_enemy_grid(trap, enemy_grid_data)
 
 
 def gain_block(character, amount):
@@ -1195,6 +1200,13 @@ def finish_enemy_actions():
         discard_random_cards_for_status()
         tick_enemy_turn_statuses(party)
         tick_traps(enemy_grid_data)
+        fire_hits = process_enemy_end_of_turn_fire(enemies, enemy_grid_data)
+
+        if fire_hits:
+            add_damage_popups_from_hits(fire_hits, "enemy")
+            queue_enemy_death_animations(enemies, enemy_death_animations)
+            handle_enemy_deaths(enemies, enemy_grid_data)
+            clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
 
     return None, next_current_turn, next_current_energy
 
@@ -1280,6 +1292,8 @@ while running:
         if event.type == pygame.QUIT:
             running = False
         if event.type == pygame.MOUSEWHEEL:
+            if current_state == MAP:
+                scroll_map(-event.y * 60)
             if current_state == REWARD and reward_mode == "choose_sleeve_card":
 
                 target_deck_scroll_y -= event.y * 60

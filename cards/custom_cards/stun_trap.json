@@ -1,0 +1,119 @@
+{
+    "id": "stun_trap",
+    "name": "stun trap",
+    "cost": 1,
+    "thickness": 0.5,
+    "type": "attack",
+    "rarity": "uncommon",
+    "image_path": "",
+    "damage": 0,
+    "block": 0,
+    "draw": 0,
+    "discard": 0,
+    "move_distance": 0,
+    "shove_distance": 0,
+    "trap_duration": 3,
+    "trap_radius": 1,
+    "status_duration": 2,
+    "status_stacks": 2,
+    "fire_stacks": 0,
+    "weak_percent": 0,
+    "description": "place a trap that applies Snare for {status_stacks} and the trap last {trap_duration}",
+    "usable_characters": [
+        "Archer"
+    ],
+    "player_preview_tile": {
+        "row": 1,
+        "col": 2
+    },
+    "target_tiles": [
+        {
+            "row": 0,
+            "col": 2
+        },
+        {
+            "row": 1,
+            "col": 1
+        },
+        {
+            "row": 1,
+            "col": 2
+        },
+        {
+            "row": 1,
+            "col": 3
+        },
+        {
+            "row": 2,
+            "col": 2
+        }
+    ],
+    "hitbox_tiles": [
+        {
+            "row": 0,
+            "col": 2
+        },
+        {
+            "row": 1,
+            "col": 1
+        },
+        {
+            "row": 1,
+            "col": 2
+        },
+        {
+            "row": 1,
+            "col": 3
+        },
+        {
+            "row": 2,
+            "col": 2
+        }
+    ],
+    "charge_tiles": [],
+    "trap_place_tiles": [
+        {
+            "row": 1,
+            "col": 2
+        }
+    ],
+    "trap_hitbox_tiles": [
+        {
+            "row": 0,
+            "col": 2
+        },
+        {
+            "row": 1,
+            "col": 1
+        },
+        {
+            "row": 1,
+            "col": 2
+        },
+        {
+            "row": 1,
+            "col": 3
+        },
+        {
+            "row": 2,
+            "col": 2
+        }
+    ],
+    "effects": [
+        {
+            "type": "apply_status",
+            "status": "snared",
+            "tiles_from": "hitbox_tiles",
+            "duration_from": "status_duration"
+        },
+        {
+            "type": "place_trap",
+            "place_tiles_from": "trap_place_tiles",
+            "trigger_tiles_from": "trap_hitbox_tiles",
+            "damage_from": "damage",
+            "duration_from": "trap_duration",
+            "snare_until_gone": false
+        }
+    ],
+    "preview_description": "place a trap that applies Snare for 2 and the trap last 3"
+}

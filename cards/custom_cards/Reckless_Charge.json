@@ -1,0 +1,48 @@
+{
+    "id": "Reckless_Charge",
+    "name": "Reckless charge",
+    "cost": 2,
+    "thickness": 0.5,
+    "type": "attack",
+    "rarity": "rare",
+    "image_path": "assets/card_templtes/card art/example.png",
+    "damage": 10,
+    "block": 0,
+    "draw": 0,
+    "discard": 0,
+    "move_distance": 2,
+    "shove_distance": 0,
+    "trap_duration": 0,
+    "trap_radius": 0,
+    "description": "Charge {move_distance} and deal {damage} to those tiles",
+    "usable_characters": [
+        "Warrior"
+    ],
+    "player_preview_tile": {
+        "row": 1,
+        "col": 0
+    },
+    "target_tiles": [
+        {
+            "row": 1,
+            "col": 1
+        },
+        {
+            "row": 1,
+            "col": 2
+        }
+    ],
+    "effects": [
+        {
+            "type": "charge_character",
+            "distance_from": "move_distance",
+            "direction": "any"
+        },
+        {
+            "type": "damage",
+            "amount_from": "damage",
+            "target_tiles_from_card": true
+        }
+    ],
+    "preview_description": "Charge 2 and deal 10 to those tiles"
+}

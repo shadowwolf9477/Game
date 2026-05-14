@@ -12,11 +12,15 @@ def get_card_preview_tiles(card, selected_character, swing_direction="right", at
         player_row = selected_character["row"]
         player_col = selected_character["col"]
         preview_tiles = []
+        attack_direction = get_character_attack_direction(selected_character)
 
         for distance in range(1, card.get("range", GRID_COLS) + 1):
-            enemy_col = player_col + distance
+            if attack_direction == "back":
+                enemy_col = player_col - distance
+            else:
+                enemy_col = player_col + distance
 
-            if enemy_col < GRID_COLS:
+            if 0 <= enemy_col < GRID_COLS:
                 preview_tiles.append((player_row, enemy_col))
 
         return preview_tiles
@@ -91,7 +95,6 @@ def get_custom_card_preview_tiles(card, selected_character):
         row_offset = tile["row"] - preview_tile["row"]
         col_offset = tile["col"] - preview_tile["col"]
 
-        # Flip horizontally if character is flipped
         if selected_character.get("flip_x", False):
             col_offset *= -1
 
@@ -102,6 +105,7 @@ def get_custom_card_preview_tiles(card, selected_character):
             preview_tiles.append((row, col))
 
     return preview_tiles
+
 
 def get_character_attack_direction(character):
     if character.get("flip_x", False):

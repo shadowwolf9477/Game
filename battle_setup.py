@@ -211,28 +211,38 @@ def place_trap_on_enemy_grid(trap, enemy_grid_data):
 def trigger_enemy_traps(enemy, enemy_grid_data):
     hits = []
 
-    for row in range(GRID_ROWS):
-        for col in range(GRID_COLS):
-            trap = enemy_grid_data[row][col].get("effect")
+    tile = enemy_grid_data[enemy["row"]][enemy["col"]]
+    trap = tile.get("effect")
 
-            if trap is None:
-                continue
+    if trap is None:
+        return hits
 
-            row_distance = abs(enemy["row"] - row)
-            col_distance = abs(enemy["col"] - col)
+    if trap.get("kind") == "fire_floor":
+        entry_damage = trap.get("entry_damage", 2)
+        fire_stacks = trap.get("fire_stacks_on_enter", 1)
 
-            if row_distance <= trap["radius"] and col_distance <= trap["radius"]:
-                enemy["hp"] -= trap["damage"]
-                hits.append({
-                    "target": enemy,
-                    "damage": trap["damage"]
-                })
+        enemy["hp"] -= entry_damage
+        apply_fire_to_enemy(enemy, fire_stacks)
 
-                if trap.get("snare_until_gone", False):
-                    enemy["trapped"] = max(
-                        enemy.get("trapped", 0),
-                        trap.get("duration", 1)
-                    )
+        hits.append({
+            "target": enemy,
+            "damage": entry_damage
+        })
+
+        return hits
+
+    row_distance = abs(enemy["row"] - trap["row"])
+    col_distance = abs(enemy["col"] - trap["col"])
+
+    if row_distance <= trap.get("radius", 0) and col_distance <= trap.get("radius", 0):
+        enemy["hp"] -= trap["damage"]
+        hits.append({
+            "target": enemy,
+            "damage": trap["damage"]
+        })
+
+        if trap.get("snare_until_gone", False):
+            enemy["trapped"] = max(enemy.get("trapped", 0), trap.get("duration", 1))
 
     return hits
 
@@ -1034,3 +1044,49 @@ def heal_random_ally(healer, enemies):
 
     if heal_target["hp"] > heal_target["max_hp"]:
         heal_target["hp"] = heal_target["max_hp"]
+
+
+def apply_fire_to_enemy(enemy, stacks):
+    enemy["fire_stacks"] = enemy.get("fire_stacks", 0) + stacks
+
+
+def tick_enemy_fire(enemy):
+    fire_stacks = enemy.get("fire_stacks", 0)
+
+    if fire_stacks <= 0:
+        return None
+
+    damage = fire_stacks * 3
+    enemy["hp"] -= damage
+    enemy["fire_stacks"] = max(0, fire_stacks - 1)
+
+    return {
+        "target": enemy,
+        "damage": damage
+    }
+
+
+def process_enemy_end_of_turn_fire(enemies, enemy_grid_data):
+    hits = []
+
+    for enemy in enemies:
+        if enemy["hp"] <= 0:
+            continue
+
+        tile = enemy_grid_data[enemy["row"]][enemy["col"]]
+        floor_effect = tile.get("effect")
+
+        if floor_effect is not None and floor_effect.get("kind") == "fire_floor":
+            stay_damage = floor_effect.get("stay_damage", 2)
+            enemy["hp"] -= stay_damage
+            hits.append({
+                "target": enemy,
+                "damage": stay_damage
+            })
+
+        fire_hit = tick_enemy_fire(enemy)
+
+        if fire_hit is not None:
+            hits.append(fire_hit)
+
+    return hits

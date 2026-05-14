@@ -5,8 +5,8 @@ import pygame
 
 pygame.init()
 
-SCREEN_WIDTH = 1500
-SCREEN_HEIGHT = 920
+SCREEN_WIDTH = 1550
+SCREEN_HEIGHT = 940
 FPS = 60
 
 GRID_ROWS = 3
@@ -86,7 +86,7 @@ class TextBox:
         pygame.draw.rect(surface, WHITE, self.rect)
         pygame.draw.rect(surface, border_color, self.rect, 3)
 
-        shown_text = self.text[-48:]
+        shown_text = self.text[-52:]
         draw_text(surface, shown_text, self.rect.x + 8, self.rect.y + 8, BLACK, small_font)
 
 
@@ -156,12 +156,17 @@ shove_distance_box = TextBox(190, 445, 130, 38, "1", "Shove Tiles")
 trap_duration_box = TextBox(340, 445, 130, 38, "3", "Trap Turns")
 trap_radius_box = TextBox(490, 445, 130, 38, "1", "Trap Radius")
 
+status_duration_box = TextBox(40, 520, 130, 38, "2", "Status Turns")
+status_stacks_box = TextBox(190, 520, 130, 38, "1", "Status Stacks")
+fire_stacks_box = TextBox(340, 520, 130, 38, "1", "Fire Stacks")
+weak_percent_box = TextBox(490, 520, 130, 38, "25", "Weak Percent")
+
 description_box = TextBox(
     40,
-    835,
+    855,
     700,
     42,
-    "Deal {damage} damage. Gain {block} block.",
+    "Deal {damage} damage.",
     "Description"
 )
 
@@ -184,6 +189,10 @@ stat_boxes = {
     "shove_distance": shove_distance_box,
     "trap_duration": trap_duration_box,
     "trap_radius": trap_radius_box,
+    "status_duration": status_duration_box,
+    "status_stacks": status_stacks_box,
+    "fire_stacks": fire_stacks_box,
+    "weak_percent": weak_percent_box,
 }
 
 usable_characters = {
@@ -191,8 +200,16 @@ usable_characters = {
     "Warrior": False,
 }
 
-selected_tiles = set()
 player_tile = (1, 0)
+
+grid_layers = {
+    "hitbox_tiles": set(),
+    "charge_tiles": set(),
+    "trap_place_tiles": set(),
+    "trap_hitbox_tiles": set(),
+}
+
+current_grid_layer = "hitbox_tiles"
 effect_order = []
 
 move_direction = "any"
@@ -211,6 +228,10 @@ character_values = {
         "shove_distance": "2",
         "trap_duration": "3",
         "trap_radius": "1",
+        "status_duration": "2",
+        "status_stacks": "1",
+        "fire_stacks": "1",
+        "weak_percent": "25",
     },
     "Warrior": {
         "damage": "5",
@@ -221,6 +242,10 @@ character_values = {
         "shove_distance": "3",
         "trap_duration": "3",
         "trap_radius": "1",
+        "status_duration": "2",
+        "status_stacks": "1",
+        "fire_stacks": "1",
+        "weak_percent": "25",
     }
 }
 
@@ -229,23 +254,23 @@ selected_saved_card_index = 0
 loaded_card_message = "No card loaded."
 
 character_buttons = {
-    "Archer": Button(40, 520, 130, 38, "Archer", LIGHT_GREEN),
-    "Warrior": Button(190, 520, 130, 38, "Warrior", GRAY),
+    "Archer": Button(40, 610, 130, 38, "Archer", LIGHT_GREEN),
+    "Warrior": Button(190, 610, 130, 38, "Warrior", GRAY),
 }
 
-per_character_button = Button(340, 520, 180, 38, "Per Character: No", GRAY)
-variant_archer_button = Button(530, 520, 130, 35, "Edit Archer", LIGHT_GREEN)
-variant_warrior_button = Button(670, 520, 130, 35, "Edit Warrior", GRAY)
+per_character_button = Button(340, 610, 180, 38, "Per Character: No", GRAY)
+variant_archer_button = Button(530, 610, 130, 35, "Edit Archer", LIGHT_GREEN)
+variant_warrior_button = Button(670, 610, 130, 35, "Edit Warrior", GRAY)
 
 direction_buttons = {
-    "any": Button(40, 605, 90, 35, "Any", LIGHT_GREEN),
-    "forward": Button(140, 605, 90, 35, "Forward", GRAY),
-    "back": Button(240, 605, 90, 35, "Back", GRAY),
-    "up": Button(340, 605, 90, 35, "Up", GRAY),
-    "down": Button(440, 605, 90, 35, "Down", GRAY),
+    "any": Button(40, 690, 90, 35, "Any", LIGHT_GREEN),
+    "forward": Button(140, 690, 90, 35, "Forward", GRAY),
+    "back": Button(240, 690, 90, 35, "Back", GRAY),
+    "up": Button(340, 690, 90, 35, "Up", GRAY),
+    "down": Button(440, 690, 90, 35, "Down", GRAY),
 }
 
-trap_snare_button = Button(540, 605, 180, 35, "Trap Snare: No", GRAY)
+trap_snare_button = Button(540, 690, 180, 35, "Trap Snare: No", GRAY)
 
 effect_buttons = [
     Button(800, 500, 160, 35, "Add Damage", RED),
@@ -258,10 +283,23 @@ effect_buttons = [
 
     Button(800, 590, 160, 35, "Add Shove", BLUE),
     Button(970, 590, 160, 35, "Add Trap", PURPLE),
+    Button(1140, 590, 160, 35, "Add Fire Trap", ORANGE),
+
+    Button(800, 635, 160, 35, "Add Fire", ORANGE),
+    Button(970, 635, 160, 35, "Add Snare", PURPLE),
+    Button(1140, 635, 160, 35, "Add Weak", BLUE),
 ]
 
-save_button = Button(40, 885, 180, 30, "Save Card", LIGHT_GREEN)
-clear_effects_button = Button(230, 885, 180, 30, "Clear Effects", RED)
+layer_buttons = {
+    "hitbox_tiles": Button(840, 360, 150, 35, "Hitbox", BLUE),
+    "charge_tiles": Button(1000, 360, 150, 35, "Charge Path", GREEN),
+    "trap_place_tiles": Button(1160, 360, 150, 35, "Trap Place", PURPLE),
+    "trap_hitbox_tiles": Button(1320, 360, 150, 35, "Trap Hitbox", ORANGE),
+}
+
+save_button = Button(40, 900, 180, 30, "Save Card", LIGHT_GREEN)
+clear_effects_button = Button(230, 900, 180, 30, "Clear Effects", RED)
+clear_layer_button = Button(420, 900, 180, 30, "Clear Layer", ORANGE)
 
 prev_saved_button = Button(515, 85, 38, 32, "<", GRAY)
 next_saved_button = Button(558, 85, 38, 32, ">", GRAY)
@@ -294,6 +332,39 @@ def get_selected_saved_card_file_name():
     return saved_card_files[selected_saved_card_index]
 
 
+def card_uses_layer(layer_name):
+    for effect in effect_order:
+        effect_type = effect.get("type")
+
+        if layer_name == "hitbox_tiles" and effect_type in ["damage", "apply_status", "shove"]:
+            return True
+
+        if layer_name == "charge_tiles" and effect_type == "charge_character":
+            return True
+
+        if layer_name == "trap_place_tiles" and effect_type in ["place_trap", "place_fire_trap"]:
+            return True
+
+        if layer_name == "trap_hitbox_tiles" and effect_type in ["place_trap", "place_fire_trap"]:
+            return True
+
+    return False
+
+
+def fix_current_layer_if_hidden():
+    global current_grid_layer
+
+    if card_uses_layer(current_grid_layer):
+        return
+
+    for layer_name in grid_layers:
+        if card_uses_layer(layer_name):
+            current_grid_layer = layer_name
+            return
+
+    current_grid_layer = "hitbox_tiles"
+
+
 def card_uses_stat(stat_name):
     for effect in effect_order:
         effect_type = effect.get("type")
@@ -316,11 +387,27 @@ def card_uses_stat(stat_name):
         if stat_name == "shove_distance" and effect_type == "shove":
             return True
 
-        if stat_name == "trap_duration" and effect_type == "place_trap":
+        if stat_name == "trap_duration" and effect_type in ["place_trap", "place_fire_trap"]:
             return True
 
         if stat_name == "trap_radius" and effect_type == "place_trap":
             return True
+
+        if stat_name == "status_duration" and effect_type == "apply_status":
+            return True
+
+        if stat_name == "status_stacks" and effect_type == "apply_status":
+            return True
+
+        if stat_name == "fire_stacks":
+            if effect_type == "place_fire_trap":
+                return True
+            if effect_type == "apply_status" and effect.get("status") == "fire":
+                return True
+
+        if stat_name == "weak_percent":
+            if effect_type == "apply_status" and effect.get("status") == "weak_attacks":
+                return True
 
     return False
 
@@ -352,6 +439,10 @@ def save_current_variant_values():
         "shove_distance": shove_distance_box.text,
         "trap_duration": trap_duration_box.text,
         "trap_radius": trap_radius_box.text,
+        "status_duration": status_duration_box.text,
+        "status_stacks": status_stacks_box.text,
+        "fire_stacks": fire_stacks_box.text,
+        "weak_percent": weak_percent_box.text,
     }
 
 
@@ -366,6 +457,10 @@ def load_variant_values(character_name):
     shove_distance_box.text = values["shove_distance"]
     trap_duration_box.text = values["trap_duration"]
     trap_radius_box.text = values["trap_radius"]
+    status_duration_box.text = values["status_duration"]
+    status_stacks_box.text = values["status_stacks"]
+    fire_stacks_box.text = values["fire_stacks"]
+    weak_percent_box.text = values["weak_percent"]
 
 
 def switch_variant_character(character_name):
@@ -384,11 +479,16 @@ def make_card_preview_description(card_data):
         "{block}": str(card_data.get("block", 0)),
         "{draw}": str(card_data.get("draw", 0)),
         "{discard}": str(card_data.get("discard", 0)),
-        "{range}": str(len(card_data.get("target_tiles", []))),
+        "{range}": str(len(card_data.get("hitbox_tiles", []))),
+        "{hitbox}": str(len(card_data.get("hitbox_tiles", []))),
         "{move_distance}": str(card_data.get("move_distance", 0)),
         "{shove_distance}": str(card_data.get("shove_distance", 0)),
         "{trap_duration}": str(card_data.get("trap_duration", 0)),
         "{trap_radius}": str(card_data.get("trap_radius", 0)),
+        "{status_duration}": str(card_data.get("status_duration", 0)),
+        "{status_stacks}": str(card_data.get("status_stacks", 0)),
+        "{fire_stacks}": str(card_data.get("fire_stacks", 0)),
+        "{weak_percent}": str(card_data.get("weak_percent", 0)),
     }
 
     for key, value in replacements.items():
@@ -407,6 +507,10 @@ def get_number_values_from_text_values(text_values):
         "shove_distance": safe_int(text_values["shove_distance"], 1),
         "trap_duration": safe_int(text_values["trap_duration"], 3),
         "trap_radius": safe_int(text_values["trap_radius"], 1),
+        "status_duration": safe_int(text_values["status_duration"], 2),
+        "status_stacks": safe_int(text_values["status_stacks"], 1),
+        "fire_stacks": safe_int(text_values["fire_stacks"], 1),
+        "weak_percent": safe_int(text_values["weak_percent"], 25),
     }
 
 
@@ -422,6 +526,13 @@ def build_character_values_for_save():
         saved_values[character_name] = get_number_values_from_text_values(character_values[character_name])
 
     return saved_values
+
+
+def tiles_to_json(layer_name):
+    return [
+        {"row": row, "col": col}
+        for row, col in sorted(grid_layers[layer_name])
+    ]
 
 
 def build_card_data():
@@ -442,6 +553,10 @@ def build_card_data():
         "shove_distance": safe_int(shove_distance_box.text, 1) if card_uses_stat("shove_distance") else 0,
         "trap_duration": safe_int(trap_duration_box.text, 3) if card_uses_stat("trap_duration") else 0,
         "trap_radius": safe_int(trap_radius_box.text, 1) if card_uses_stat("trap_radius") else 0,
+        "status_duration": safe_int(status_duration_box.text, 2) if card_uses_stat("status_duration") else 0,
+        "status_stacks": safe_int(status_stacks_box.text, 1) if card_uses_stat("status_stacks") else 0,
+        "fire_stacks": safe_int(fire_stacks_box.text, 1) if card_uses_stat("fire_stacks") else 0,
+        "weak_percent": safe_int(weak_percent_box.text, 25) if card_uses_stat("weak_percent") else 0,
 
         "description": description_box.text,
 
@@ -455,12 +570,13 @@ def build_card_data():
             "col": player_tile[1],
         },
 
-        "target_tiles": [
-            {"row": row, "col": col}
-            for row, col in sorted(selected_tiles)
-        ],
+        "target_tiles": tiles_to_json("hitbox_tiles"),
+        "hitbox_tiles": tiles_to_json("hitbox_tiles"),
+        "charge_tiles": tiles_to_json("charge_tiles"),
+        "trap_place_tiles": tiles_to_json("trap_place_tiles"),
+        "trap_hitbox_tiles": tiles_to_json("trap_hitbox_tiles"),
 
-        "effects": effect_order,
+        "effects": copy.deepcopy(effect_order),
     }
 
     if per_character_enabled:
@@ -493,9 +609,16 @@ def save_card():
 
 
 def reset_editor_to_new_card():
-    global selected_tiles, player_tile, effect_order
-    global move_direction, trap_snares, per_character_enabled
-    global current_variant_character, character_values, loaded_card_message
+    global player_tile
+    global grid_layers
+    global current_grid_layer
+    global effect_order
+    global move_direction
+    global trap_snares
+    global per_character_enabled
+    global current_variant_character
+    global character_values
+    global loaded_card_message
 
     card_name_box.text = "New Card"
     card_id_box.text = "new_card"
@@ -512,14 +635,24 @@ def reset_editor_to_new_card():
     shove_distance_box.text = "1"
     trap_duration_box.text = "3"
     trap_radius_box.text = "1"
+    status_duration_box.text = "2"
+    status_stacks_box.text = "1"
+    fire_stacks_box.text = "1"
+    weak_percent_box.text = "25"
 
-    description_box.text = "Deal {damage} damage. Gain {block} block."
+    description_box.text = "Deal {damage} damage."
 
     usable_characters["Archer"] = True
     usable_characters["Warrior"] = False
 
-    selected_tiles = set()
     player_tile = (1, 0)
+    grid_layers = {
+        "hitbox_tiles": set(),
+        "charge_tiles": set(),
+        "trap_place_tiles": set(),
+        "trap_hitbox_tiles": set(),
+    }
+    current_grid_layer = "hitbox_tiles"
     effect_order = []
 
     move_direction = "any"
@@ -537,6 +670,10 @@ def reset_editor_to_new_card():
             "shove_distance": "2",
             "trap_duration": "3",
             "trap_radius": "1",
+            "status_duration": "2",
+            "status_stacks": "1",
+            "fire_stacks": "1",
+            "weak_percent": "25",
         },
         "Warrior": {
             "damage": "5",
@@ -547,16 +684,40 @@ def reset_editor_to_new_card():
             "shove_distance": "3",
             "trap_duration": "3",
             "trap_radius": "1",
+            "status_duration": "2",
+            "status_stacks": "1",
+            "fire_stacks": "1",
+            "weak_percent": "25",
         }
     }
 
     loaded_card_message = "Started new card."
 
 
+def load_tile_layer(card_data, new_layers, layer_name, fallback_name=None):
+    source_name = layer_name
+
+    if fallback_name is not None and layer_name not in card_data:
+        source_name = fallback_name
+
+    for tile in card_data.get(source_name, []):
+        new_layers[layer_name].add((
+            int(tile.get("row", 0)),
+            int(tile.get("col", 0)),
+        ))
+
+
 def load_card_into_editor(card_data, file_name):
-    global selected_tiles, player_tile, effect_order
-    global move_direction, trap_snares, per_character_enabled
-    global current_variant_character, character_values, loaded_card_message
+    global player_tile
+    global grid_layers
+    global current_grid_layer
+    global effect_order
+    global move_direction
+    global trap_snares
+    global per_character_enabled
+    global current_variant_character
+    global character_values
+    global loaded_card_message
 
     card_name_box.text = card_data.get("name", "New Card")
     card_id_box.text = card_data.get("id", file_name.replace(".json", ""))
@@ -574,6 +735,10 @@ def load_card_into_editor(card_data, file_name):
     shove_distance_box.text = number_to_text(card_data.get("shove_distance", 1), "1")
     trap_duration_box.text = number_to_text(card_data.get("trap_duration", 3), "3")
     trap_radius_box.text = number_to_text(card_data.get("trap_radius", 1), "1")
+    status_duration_box.text = number_to_text(card_data.get("status_duration", 2), "2")
+    status_stacks_box.text = number_to_text(card_data.get("status_stacks", 1), "1")
+    fire_stacks_box.text = number_to_text(card_data.get("fire_stacks", 1), "1")
+    weak_percent_box.text = number_to_text(card_data.get("weak_percent", 25), "25")
 
     description_box.text = card_data.get("description", "")
 
@@ -584,10 +749,19 @@ def load_card_into_editor(card_data, file_name):
     preview_tile = card_data.get("player_preview_tile", {"row": 1, "col": 0})
     player_tile = (int(preview_tile.get("row", 1)), int(preview_tile.get("col", 0)))
 
-    selected_tiles = set()
-    for tile in card_data.get("target_tiles", []):
-        selected_tiles.add((int(tile.get("row", 0)), int(tile.get("col", 0))))
+    new_layers = {
+        "hitbox_tiles": set(),
+        "charge_tiles": set(),
+        "trap_place_tiles": set(),
+        "trap_hitbox_tiles": set(),
+    }
 
+    load_tile_layer(card_data, new_layers, "hitbox_tiles", "target_tiles")
+    load_tile_layer(card_data, new_layers, "charge_tiles")
+    load_tile_layer(card_data, new_layers, "trap_place_tiles")
+    load_tile_layer(card_data, new_layers, "trap_hitbox_tiles")
+
+    grid_layers = new_layers
     effect_order = copy.deepcopy(card_data.get("effects", []))
 
     move_direction = "any"
@@ -613,6 +787,10 @@ def load_card_into_editor(card_data, file_name):
             "shove_distance": shove_distance_box.text,
             "trap_duration": trap_duration_box.text,
             "trap_radius": trap_radius_box.text,
+            "status_duration": status_duration_box.text,
+            "status_stacks": status_stacks_box.text,
+            "fire_stacks": fire_stacks_box.text,
+            "weak_percent": weak_percent_box.text,
         },
         "Warrior": {
             "damage": damage_box.text,
@@ -623,6 +801,10 @@ def load_card_into_editor(card_data, file_name):
             "shove_distance": shove_distance_box.text,
             "trap_duration": trap_duration_box.text,
             "trap_radius": trap_radius_box.text,
+            "status_duration": status_duration_box.text,
+            "status_stacks": status_stacks_box.text,
+            "fire_stacks": fire_stacks_box.text,
+            "weak_percent": weak_percent_box.text,
         }
     }
 
@@ -641,6 +823,10 @@ def load_card_into_editor(card_data, file_name):
                     "shove_distance": number_to_text(values.get("shove_distance", 1), "1"),
                     "trap_duration": number_to_text(values.get("trap_duration", 3), "3"),
                     "trap_radius": number_to_text(values.get("trap_radius", 1), "1"),
+                    "status_duration": number_to_text(values.get("status_duration", 2), "2"),
+                    "status_stacks": number_to_text(values.get("status_stacks", 1), "1"),
+                    "fire_stacks": number_to_text(values.get("fire_stacks", 1), "1"),
+                    "weak_percent": number_to_text(values.get("weak_percent", 25), "25"),
                 }
 
         if usable_characters.get("Archer", False):
@@ -650,6 +836,7 @@ def load_card_into_editor(card_data, file_name):
 
         load_variant_values(current_variant_character)
 
+    fix_current_layer_if_hidden()
     loaded_card_message = "Loaded: " + file_name
 
 
@@ -706,7 +893,7 @@ def draw_visible_stat_boxes(surface):
 
 
 def draw_card_preview(surface, card_data):
-    card_rect = pygame.Rect(40, 665, 280, 115)
+    card_rect = pygame.Rect(40, 755, 280, 90)
     pygame.draw.rect(surface, GREEN, card_rect)
     pygame.draw.rect(surface, BLACK, card_rect, 3)
 
@@ -715,36 +902,85 @@ def draw_card_preview(surface, card_data):
     if per_character_enabled:
         title += " (" + current_variant_character + ")"
 
-    draw_text(surface, title, card_rect.x + 15, card_rect.y + 10, WHITE, font)
-    draw_text(surface, "Cost: " + str(card_data["cost"]), card_rect.x + 15, card_rect.y + 40, WHITE, small_font)
-    draw_text(surface, "Thickness: " + str(card_data["thickness"]), card_rect.x + 15, card_rect.y + 61, WHITE, small_font)
-    draw_text(surface, "Art: " + os.path.basename(card_data.get("image_path", ""))[-22:], card_rect.x + 15, card_rect.y + 82, WHITE, small_font)
+    draw_text(surface, title, card_rect.x + 15, card_rect.y + 8, WHITE, font)
+    draw_text(surface, "Cost: " + str(card_data["cost"]) + " | Thick: " + str(card_data["thickness"]), card_rect.x + 15, card_rect.y + 38, WHITE, small_font)
+    draw_text(surface, "Art: " + os.path.basename(card_data.get("image_path", ""))[-22:], card_rect.x + 15, card_rect.y + 60, WHITE, small_font)
+
+
+def get_layer_color_for_tile(row, col):
+    if (row, col) == player_tile:
+        return GREEN
+
+    if (row, col) in grid_layers["trap_hitbox_tiles"]:
+        return ORANGE
+
+    if (row, col) in grid_layers["trap_place_tiles"]:
+        return PURPLE
+
+    if (row, col) in grid_layers["charge_tiles"]:
+        return LIGHT_GREEN
+
+    if (row, col) in grid_layers["hitbox_tiles"]:
+        return BLUE
+
+    return WHITE
+
+
+def draw_layer_markers(surface, rect, row, col):
+    marker_x = rect.x + 4
+    marker_y = rect.y + 4
+
+    if (row, col) in grid_layers["hitbox_tiles"]:
+        draw_text(surface, "H", marker_x, marker_y, BLACK, small_font)
+        marker_y += 18
+
+    if (row, col) in grid_layers["charge_tiles"]:
+        draw_text(surface, "C", marker_x, marker_y, BLACK, small_font)
+        marker_y += 18
+
+    if (row, col) in grid_layers["trap_place_tiles"]:
+        draw_text(surface, "P", marker_x, marker_y, BLACK, small_font)
+        marker_y += 18
+
+    if (row, col) in grid_layers["trap_hitbox_tiles"]:
+        draw_text(surface, "T", marker_x, marker_y, BLACK, small_font)
 
 
 def draw_grid(surface):
     start_x = 930
     start_y = 100
 
-    draw_text(surface, "Left click blue squares for card hitbox/range.", 840, 50, BLACK, small_font)
-    draw_text(surface, "Right click a square to move player preview.", 840, 75, BLACK, small_font)
+    draw_text(surface, "Left click toggles selected layer. Right click moves player P.", 840, 50, BLACK, small_font)
+    draw_text(surface, "H=hitbox C=charge P=trap place T=trap trigger", 840, 75, BLACK, small_font)
 
     for row in range(GRID_ROWS):
         for col in range(GRID_COLS):
             rect = pygame.Rect(start_x + col * TILE_SIZE, start_y + row * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-
-            color = WHITE
-
-            if (row, col) in selected_tiles:
-                color = BLUE
-
-            if (row, col) == player_tile:
-                color = GREEN
+            color = get_layer_color_for_tile(row, col)
 
             pygame.draw.rect(surface, color, rect)
             pygame.draw.rect(surface, BLACK, rect, 3)
+            draw_layer_markers(surface, rect, row, col)
 
             if (row, col) == player_tile:
                 draw_text(surface, "P", rect.x + 32, rect.y + 25, WHITE, big_font)
+
+
+def draw_layer_buttons(surface):
+    fix_current_layer_if_hidden()
+
+    draw_text(surface, "Grid Layer", 840, 330, BLACK, font)
+
+    any_layer_visible = False
+
+    for layer_name, button in layer_buttons.items():
+        if card_uses_layer(layer_name):
+            any_layer_visible = True
+            button.color = LIGHT_GREEN if current_grid_layer == layer_name else GRAY
+            button.draw(surface)
+
+    if not any_layer_visible:
+        draw_text(surface, "Add Damage, Charge, Trap, Fire, Snare, Weak, or Shove to show layers.", 840, 365, DARK_GRAY, small_font)
 
 
 def get_grid_square_from_mouse(pos):
@@ -763,7 +999,12 @@ def get_grid_square_from_mouse(pos):
 
 def add_effect(effect_type):
     if effect_type == "damage":
-        effect_order.append({"type": "damage", "amount_from": "damage", "target_tiles_from_card": True})
+        effect_order.append({
+            "type": "damage",
+            "amount_from": "damage",
+            "tiles_from": "hitbox_tiles",
+            "target_tiles_from_card": True,
+        })
 
     elif effect_type == "block":
         effect_order.append({"type": "gain_block", "amount_from": "block"})
@@ -775,36 +1016,89 @@ def add_effect(effect_type):
         effect_order.append({"type": "discard_cards", "amount_from": "discard"})
 
     elif effect_type == "move":
-        effect_order.append({"type": "move_character", "distance_from": "move_distance", "direction": move_direction})
+        effect_order.append({
+            "type": "move_character",
+            "distance_from": "move_distance",
+            "direction": move_direction
+        })
 
     elif effect_type == "charge":
-        effect_order.append({"type": "charge_character", "distance_from": "move_distance", "direction": move_direction})
+        effect_order.append({
+            "type": "charge_character",
+            "distance_from": "move_distance",
+            "direction": move_direction,
+            "tiles_from": "charge_tiles"
+        })
 
     elif effect_type == "shove":
-        effect_order.append({"type": "shove", "distance_from": "shove_distance", "direction": move_direction})
+        effect_order.append({
+            "type": "shove",
+            "distance_from": "shove_distance",
+            "direction": move_direction,
+            "tiles_from": "hitbox_tiles"
+        })
 
     elif effect_type == "trap":
         effect_order.append({
             "type": "place_trap",
-            "center": "player_position",
+            "place_tiles_from": "trap_place_tiles",
+            "trigger_tiles_from": "trap_hitbox_tiles",
             "damage_from": "damage",
             "duration_from": "trap_duration",
-            "radius_from": "trap_radius",
             "snare_until_gone": trap_snares,
         })
 
+    elif effect_type == "fire_trap":
+        effect_order.append({
+            "type": "place_fire_trap",
+            "place_tiles_from": "trap_place_tiles",
+            "trigger_tiles_from": "trap_hitbox_tiles",
+            "duration_from": "trap_duration",
+            "fire_stacks_from": "fire_stacks",
+            "entry_damage": 2,
+            "stay_damage": 2,
+        })
+
+    elif effect_type == "fire":
+        effect_order.append({
+            "type": "apply_status",
+            "status": "fire",
+            "tiles_from": "hitbox_tiles",
+            "stacks_from": "fire_stacks",
+        })
+
+    elif effect_type == "snare":
+        effect_order.append({
+            "type": "apply_status",
+            "status": "snared",
+            "tiles_from": "hitbox_tiles",
+            "duration_from": "status_duration",
+        })
+
+    elif effect_type == "weak":
+        effect_order.append({
+            "type": "apply_status",
+            "status": "weak_attacks",
+            "tiles_from": "hitbox_tiles",
+            "duration_from": "status_duration",
+            "weak_percent_from": "weak_percent",
+        })
+
+    fix_current_layer_if_hidden()
+
 
 def handle_effect_order_click(mouse_pos):
-    box = pygame.Rect(760, 690, 650, 195)
+    box = pygame.Rect(760, 690, 735, 205)
     y = box.y + 45
 
     for index, effect in enumerate(effect_order):
-        x_button = pygame.Rect(box.x + 300, y - 2, 24, 22)
-        up_button = pygame.Rect(box.x + 335, y - 2, 24, 22)
-        down_button = pygame.Rect(box.x + 370, y - 2, 24, 22)
+        x_button = pygame.Rect(box.x + 390, y - 2, 24, 22)
+        up_button = pygame.Rect(box.x + 425, y - 2, 24, 22)
+        down_button = pygame.Rect(box.x + 460, y - 2, 24, 22)
 
         if x_button.collidepoint(mouse_pos):
             effect_order.pop(index)
+            fix_current_layer_if_hidden()
             return True
 
         if up_button.collidepoint(mouse_pos):
@@ -822,8 +1116,25 @@ def handle_effect_order_click(mouse_pos):
     return False
 
 
+def get_effect_display_text(effect):
+    effect_type = effect.get("type", "")
+
+    if effect_type == "apply_status":
+        return effect_type + " / " + effect.get("status", "")
+
+    if effect_type in ["place_trap", "place_fire_trap"]:
+        return effect_type
+
+    text = effect_type
+
+    if "direction" in effect:
+        text += " / " + effect["direction"]
+
+    return text
+
+
 def draw_effect_order(surface):
-    box = pygame.Rect(760, 690, 650, 195)
+    box = pygame.Rect(760, 690, 735, 205)
     pygame.draw.rect(surface, WHITE, box)
     pygame.draw.rect(surface, BLACK, box, 3)
 
@@ -832,36 +1143,27 @@ def draw_effect_order(surface):
     y = box.y + 45
 
     for index, effect in enumerate(effect_order):
-        text = str(index + 1) + ". " + effect["type"]
-
-        if "direction" in effect:
-            text += " / " + effect["direction"]
-
-        if effect.get("type") == "place_trap":
-            text += " / snare " + str(effect.get("snare_until_gone", False))
-
+        text = str(index + 1) + ". " + get_effect_display_text(effect)
         draw_text(surface, text, box.x + 15, y, BLACK, small_font)
 
-        x_button = pygame.Rect(box.x + 300, y - 2, 24, 22)
+        x_button = pygame.Rect(box.x + 390, y - 2, 24, 22)
         pygame.draw.rect(surface, RED, x_button)
         pygame.draw.rect(surface, BLACK, x_button, 2)
         draw_text(surface, "X", x_button.x + 6, x_button.y + 2, BLACK, small_font)
 
-        up_button = pygame.Rect(box.x + 335, y - 2, 24, 22)
+        up_button = pygame.Rect(box.x + 425, y - 2, 24, 22)
         pygame.draw.rect(surface, GRAY, up_button)
         pygame.draw.rect(surface, BLACK, up_button, 2)
         draw_text(surface, "^", up_button.x + 7, up_button.y + 2, BLACK, small_font)
 
-        down_button = pygame.Rect(box.x + 370, y - 2, 24, 22)
+        down_button = pygame.Rect(box.x + 460, y - 2, 24, 22)
         pygame.draw.rect(surface, GRAY, down_button)
         pygame.draw.rect(surface, BLACK, down_button, 2)
         draw_text(surface, "v", down_button.x + 7, down_button.y + 2, BLACK, small_font)
 
         y += 24
 
-    draw_text(surface, "X = delete", box.x + 430, box.y + 45, DARK_GRAY, small_font)
-    draw_text(surface, "^ = move up", box.x + 430, box.y + 70, DARK_GRAY, small_font)
-    draw_text(surface, "v = move down", box.x + 430, box.y + 95, DARK_GRAY, small_font)
+    draw_text(surface, "X delete | ^ up | v down", box.x + 515, box.y + 45, DARK_GRAY, small_font)
 
 
 refresh_saved_card_files()
@@ -883,7 +1185,7 @@ while running:
 
     draw_visible_stat_boxes(screen)
 
-    draw_text(screen, "Usable Characters", 40, 495, BLACK, font)
+    draw_text(screen, "Usable Characters", 40, 585, BLACK, font)
 
     for character_name, button in character_buttons.items():
         button.color = LIGHT_GREEN if usable_characters[character_name] else GRAY
@@ -899,7 +1201,7 @@ while running:
         variant_archer_button.draw(screen)
         variant_warrior_button.draw(screen)
 
-    draw_text(screen, "Move / Charge / Shove Direction", 40, 580, BLACK, font)
+    draw_text(screen, "Move / Charge / Shove Direction", 40, 665, BLACK, font)
 
     for direction, button in direction_buttons.items():
         button.color = LIGHT_GREEN if direction == move_direction else GRAY
@@ -911,6 +1213,7 @@ while running:
 
     draw_card_preview(screen, card_data)
     draw_grid(screen)
+    draw_layer_buttons(screen)
 
     draw_text(screen, "Add Effects", 800, 455, BLACK, big_font)
 
@@ -919,10 +1222,10 @@ while running:
 
     draw_wrapped_text(
         screen,
-        "Description variables: {damage}, {block}, {draw}, {discard}, {range}, {move_distance}, {shove_distance}, {trap_duration}, {trap_radius}",
+        "Description variables: {damage}, {block}, {draw}, {discard}, {range}, {hitbox}, {move_distance}, {shove_distance}, {trap_duration}, {status_duration}, {status_stacks}, {fire_stacks}, {weak_percent}",
         40,
-        790,
-        84,
+        815,
+        92,
         BLACK,
         small_font,
         18
@@ -930,6 +1233,7 @@ while running:
 
     save_button.draw(screen)
     clear_effects_button.draw(screen)
+    clear_layer_button.draw(screen)
     draw_effect_order(screen)
 
     pygame.display.flip()
@@ -947,6 +1251,11 @@ while running:
 
         if clear_effects_button.clicked(event):
             effect_order.clear()
+            fix_current_layer_if_hidden()
+
+        if clear_layer_button.clicked(event):
+            if current_grid_layer in grid_layers:
+                grid_layers[current_grid_layer].clear()
 
         if prev_saved_button.clicked(event):
             if saved_card_files:
@@ -984,6 +1293,10 @@ while running:
                     "shove_distance": shove_distance_box.text,
                     "trap_duration": trap_duration_box.text,
                     "trap_radius": trap_radius_box.text,
+                    "status_duration": status_duration_box.text,
+                    "status_stacks": status_stacks_box.text,
+                    "fire_stacks": fire_stacks_box.text,
+                    "weak_percent": weak_percent_box.text,
                 }
                 character_values["Warrior"] = character_values["Archer"].copy()
                 current_variant_character = "Archer"
@@ -1008,6 +1321,10 @@ while running:
         if trap_snare_button.clicked(event):
             trap_snares = not trap_snares
 
+        for layer_name, button in layer_buttons.items():
+            if card_uses_layer(layer_name) and button.clicked(event):
+                current_grid_layer = layer_name
+
         for button in effect_buttons:
             if button.clicked(event):
                 if button.text == "Add Damage":
@@ -1026,6 +1343,14 @@ while running:
                     add_effect("shove")
                 elif button.text == "Add Trap":
                     add_effect("trap")
+                elif button.text == "Add Fire Trap":
+                    add_effect("fire_trap")
+                elif button.text == "Add Fire":
+                    add_effect("fire")
+                elif button.text == "Add Snare":
+                    add_effect("snare")
+                elif button.text == "Add Weak":
+                    add_effect("weak")
 
         if event.type == pygame.MOUSEBUTTONDOWN:
             if handle_effect_order_click(event.pos):
@@ -1035,10 +1360,13 @@ while running:
 
             if square is not None:
                 if event.button == 1:
-                    if square in selected_tiles:
-                        selected_tiles.remove(square)
+                    fix_current_layer_if_hidden()
+                    active_tiles = grid_layers[current_grid_layer]
+
+                    if square in active_tiles:
+                        active_tiles.remove(square)
                     else:
-                        selected_tiles.add(square)
+                        active_tiles.add(square)
 
                 elif event.button == 3:
                     player_tile = square

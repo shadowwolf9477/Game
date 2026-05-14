@@ -1,7 +1,61 @@
 import random
 
 
-LAYER_COUNT = 8
+LAYER_COUNT = 12
+MAX_SHOPS = 6
+MAX_EVENTS = 15
+PATH_COUNT = 3
+
+
+def generate_map():
+    map_layers = []
+    nodes_per_layer = generate_nodes_per_layer(LAYER_COUNT)
+
+    shops_placed = 0
+    events_placed = 0
+
+    for layer in range(LAYER_COUNT):
+        nodes_in_layer = nodes_per_layer[layer]
+        layer_nodes = []
+
+        for index in range(nodes_in_layer):
+            node_type, shops_placed, events_placed = choose_node_type(
+                layer,
+                shops_placed,
+                events_placed
+            )
+
+            node = {
+                "connections": [],
+                "type": node_type,
+                "layer": layer,
+                "index": index,
+                "x": get_node_x(index, nodes_in_layer),
+                "y": 80 + layer * 70,
+                "completed": False,
+                "available": False
+            }
+
+            layer_nodes.append(node)
+
+        if layer != 0 and layer != LAYER_COUNT - 1:
+            shops_placed, events_placed = guarantee_battle_in_layer(
+                layer_nodes,
+                shops_placed,
+                events_placed
+            )
+
+        map_layers.append(layer_nodes)
+
+    add_spire_style_connections(map_layers)
+
+    start_node = map_layers[0][0]
+    start_node["completed"] = True
+
+    for connected_index in start_node["connections"]:
+        map_layers[1][connected_index]["available"] = True
+
+    return map_layers
 
 
 def generate_nodes_per_layer(layer_count):
@@ -13,107 +67,194 @@ def generate_nodes_per_layer(layer_count):
         elif layer == layer_count - 1:
             nodes_per_layer.append(1)
         else:
-            nodes_per_layer.append(random.randint(2, 4))
+            nodes_per_layer.append(random.randint(3, 5))
 
     return nodes_per_layer
 
-def generate_map():
-    # Build the full branching map after the tutorial fight.
-    map_layers = []
-    nodes_per_layer = generate_nodes_per_layer(LAYER_COUNT)
 
-    for layer in range(LAYER_COUNT):
-        nodes_in_layer = nodes_per_layer[layer]
-        layer_nodes = []
+def choose_node_type(layer, shops_placed, events_placed):
+    if layer == 0:
+        return "start", shops_placed, events_placed
 
-        for index in range(nodes_in_layer):
+    if layer == LAYER_COUNT - 1:
+        return "boss", shops_placed, events_placed
 
-            if layer == 0:
-                node_type = "start"
-            elif layer == LAYER_COUNT - 1:
-                node_type = "boss"
-            elif layer % 4 == 0:
-                # Every fourth stop is a safe recovery/upgrade style node.
-                node_type = "rest"
-            else:
-                # Battles appear twice to make them slightly more common.
-                possible_types = ["battle", "battle", "battle", "shop", "upgrade", "event"]
-                node_type = random.choice(possible_types)
+    if layer % 5 == 0:
+        return "rest", shops_placed, events_placed
 
-            node = {
-                "connections": [],
-                "type": node_type,
-                "layer": layer,
-                "index": index,
-                "x": get_node_x(index, nodes_in_layer),
-                "y": 80 + layer * 80,
-                # completed/available control what the player has passed and can click.
-                "completed": False,
-                "available": False
-            }
+    possible_types = [
+        "battle",
+        "battle",
+        "battle",
+        "battle",
+        "upgrade"
+    ]
 
-            layer_nodes.append(node)
+    if shops_placed < MAX_SHOPS:
+        possible_types.append("shop")
 
-        map_layers.append(layer_nodes)
+    if events_placed < MAX_EVENTS:
+        possible_types.append("event")
 
-    add_connections(map_layers)
-    start_node = map_layers[0][0]
-    start_node["completed"] = True
+    node_type = random.choice(possible_types)
 
-    for connected_index in start_node["connections"]:
-        map_layers[1][connected_index]["available"] = True
+    if node_type == "shop":
+        shops_placed += 1
 
-    return map_layers
+    if node_type == "event":
+        events_placed += 1
+
+    return node_type, shops_placed, events_placed
+
+
+def guarantee_battle_in_layer(layer_nodes, shops_placed, events_placed):
+    for node in layer_nodes:
+        if node["type"] == "battle":
+            return shops_placed, events_placed
+
+    node_to_replace = random.choice(layer_nodes)
+    old_type = node_to_replace["type"]
+
+    if old_type == "shop":
+        shops_placed -= 1
+
+    if old_type == "event":
+        events_placed -= 1
+
+    node_to_replace["type"] = "battle"
+
+    return shops_placed, events_placed
 
 
 def get_node_x(index, nodes_in_layer):
     center_x = 600
-    spacing = 220
+    spacing = 170
     total_width = (nodes_in_layer - 1) * spacing
     start_x = center_x - total_width // 2
-    x = start_x + index * spacing
-    return x
+
+    jitter = random.randint(-20, 20)
+
+    return start_x + index * spacing + jitter
 
 
-def add_connections(map_layers):
+def add_spire_style_connections(map_layers):
+    for path_index in range(PATH_COUNT):
+        current_index = 0
+
+        for layer_index in range(len(map_layers) - 1):
+            current_layer = map_layers[layer_index]
+            next_layer = map_layers[layer_index + 1]
+
+            current_index = clamp(current_index, 0, len(current_layer) - 1)
+
+            if layer_index == 0:
+                current_index = 0
+
+            current_node = current_layer[current_index]
+
+            possible_next_indexes = get_nearby_next_indexes(
+                current_node,
+                next_layer
+            )
+
+            next_index = random.choice(possible_next_indexes)
+
+            if next_index not in current_node["connections"]:
+                current_node["connections"].append(next_index)
+                current_node["connections"].sort()
+
+            current_index = next_index
+
+    add_extra_splits(map_layers)
+    remove_crossing_connections(map_layers)
+    make_every_next_node_reachable(map_layers)
+
+
+def get_nearby_next_indexes(current_node, next_layer):
+    possible = []
+
+    for next_node in next_layer:
+        index_distance = abs(next_node["index"] - current_node["index"])
+
+        if index_distance <= 1:
+            possible.append(next_node["index"])
+
+    if not possible:
+        possible.append(get_closest_node_index(current_node["index"], next_layer))
+
+    return possible
+
+
+def add_extra_splits(map_layers):
     for layer_index in range(len(map_layers) - 1):
         current_layer = map_layers[layer_index]
         next_layer = map_layers[layer_index + 1]
 
+        if layer_index == 0:
+            continue
+
+        if layer_index == len(map_layers) - 2:
+            continue
+
         for node in current_layer:
-            possible_connections = []
+            if random.random() > 0.28:
+                continue
 
-            for next_index in range(len(next_layer)):
-                if abs(next_index - node["index"]) <= 1:
-                    possible_connections.append(next_index)
+            if len(node["connections"]) >= 2:
+                continue
 
-            if len(possible_connections) == 0:
-                closest_index = get_closest_node_index(node["index"], next_layer)
-                possible_connections.append(closest_index)
+            nearby = get_nearby_next_indexes(node, next_layer)
+            random.shuffle(nearby)
 
-            max_connections = min(2, len(possible_connections))
-            connection_count = random.randint(1, max_connections)
-            node["connections"] = random.sample(possible_connections, connection_count)
-
-        make_every_next_node_reachable(current_layer, next_layer)
+            for next_index in nearby:
+                if next_index not in node["connections"]:
+                    node["connections"].append(next_index)
+                    node["connections"].sort()
+                    break
 
 
-def make_every_next_node_reachable(current_layer, next_layer):
-    # The random pass can leave a visible node with no road into it.
-    # Add one closest incoming road for every orphaned node.
-    for next_node in next_layer:
-        next_index = next_node["index"]
-        has_incoming_connection = False
+def remove_crossing_connections(map_layers):
+    for layer_index in range(len(map_layers) - 1):
+        current_layer = map_layers[layer_index]
+
+        for left_node in current_layer:
+            for right_node in current_layer:
+                if left_node["index"] >= right_node["index"]:
+                    continue
+
+                for left_connection in left_node["connections"][:]:
+                    for right_connection in right_node["connections"][:]:
+                        if left_connection > right_connection:
+                            if random.random() < 0.5:
+                                left_node["connections"].remove(left_connection)
+                            else:
+                                right_node["connections"].remove(right_connection)
+
+
+def make_every_next_node_reachable(map_layers):
+    for layer_index in range(len(map_layers) - 1):
+        current_layer = map_layers[layer_index]
+        next_layer = map_layers[layer_index + 1]
+
+        for next_node in next_layer:
+            has_incoming_connection = False
+
+            for current_node in current_layer:
+                if next_node["index"] in current_node["connections"]:
+                    has_incoming_connection = True
+                    break
+
+            if not has_incoming_connection:
+                closest_current_node = get_closest_current_node(next_node, current_layer)
+
+                if next_node["index"] not in closest_current_node["connections"]:
+                    closest_current_node["connections"].append(next_node["index"])
+                    closest_current_node["connections"].sort()
 
         for current_node in current_layer:
-            if next_index in current_node["connections"]:
-                has_incoming_connection = True
-                break
-
-        if not has_incoming_connection:
-            closest_current_node = get_closest_current_node(next_node, current_layer)
-            closest_current_node["connections"].append(next_index)
-            closest_current_node["connections"].sort()
+            if len(current_node["connections"]) == 0:
+                closest_index = get_closest_node_index(current_node["index"], next_layer)
+                current_node["connections"].append(closest_index)
 
 
 def get_closest_current_node(next_node, current_layer):
@@ -142,3 +283,7 @@ def get_closest_node_index(current_index, next_layer):
             closest_distance = distance
 
     return closest_index
+
+
+def clamp(value, minimum, maximum):
+    return max(minimum, min(value, maximum))

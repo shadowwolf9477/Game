@@ -98,14 +98,23 @@ def play_pierce_row(card, selected_character, enemies):
     attack_range = card.get("range", GRID_COLS)
     hits = []
     target_columns = []
+    attack_direction = get_character_attack_direction(selected_character)
 
     for distance in range(1, attack_range + 1):
-        enemy_col = selected_character["col"] + distance
+        if attack_direction == "back":
+            enemy_col = selected_character["col"] - distance
+        else:
+            enemy_col = selected_character["col"] + distance
 
-        if enemy_col < GRID_COLS:
+        if 0 <= enemy_col < GRID_COLS:
             target_columns.append(enemy_col)
 
-    for enemy in sorted(enemies, key=lambda enemy: enemy["col"]):
+    if attack_direction == "back":
+        sorted_enemies = sorted(enemies, key=lambda enemy: -enemy["col"])
+    else:
+        sorted_enemies = sorted(enemies, key=lambda enemy: enemy["col"])
+
+    for enemy in sorted_enemies:
         if (
             enemy["row"] == selected_character["row"]
             and enemy["col"] in target_columns
@@ -305,10 +314,14 @@ def get_custom_preview_tile(card, selected_character):
 
 
 def get_relative_custom_target_tiles(card, selected_character):
+    return get_relative_custom_tiles_from_layer(card, selected_character, "target_tiles")
+
+
+def get_relative_custom_tiles_from_layer(card, selected_character, layer_name):
     target_tiles = []
     preview_tile = get_custom_preview_tile(card, selected_character)
 
-    for tile in card.get("target_tiles", []):
+    for tile in card.get(layer_name, []):
         row_offset = tile["row"] - preview_tile["row"]
         col_offset = tile["col"] - preview_tile["col"]
 
@@ -333,7 +346,10 @@ def get_enemy_on_tile(enemies, row, col):
 
 
 def get_first_enemy_on_custom_tiles(card, selected_character, enemies):
-    target_tiles = get_relative_custom_target_tiles(card, selected_character)
+    target_tiles = get_relative_custom_tiles_from_layer(card, selected_character, "hitbox_tiles")
+
+    if not target_tiles:
+        target_tiles = get_relative_custom_target_tiles(card, selected_character)
 
     for row, col in target_tiles:
         enemy = get_enemy_on_tile(enemies, row, col)
@@ -355,7 +371,15 @@ def run_custom_card_effect(card, selected_character, enemies):
 
         if effect_type == "damage":
             amount = get_custom_card_value(card, selected_character, "damage", card.get("damage", 0))
-            target_tiles = get_relative_custom_target_tiles(card, selected_character)
+
+            target_tiles = get_relative_custom_tiles_from_layer(
+                card,
+                selected_character,
+                effect.get("tiles_from", "hitbox_tiles")
+            )
+
+            if not target_tiles:
+                target_tiles = get_relative_custom_target_tiles(card, selected_character)
 
             for row, col in target_tiles:
                 enemy = get_enemy_on_tile(enemies, row, col)
@@ -395,20 +419,132 @@ def run_custom_card_effect(card, selected_character, enemies):
             result["shove_target"] = target
             result["push_range"] = distance
 
+        elif effect_type == "apply_status":
+            status_name = effect.get("status")
+
+            if status_name is None:
+                continue
+
+            duration = get_custom_card_value(
+                card,
+                selected_character,
+                "status_duration",
+                card.get("status_duration", 1)
+            )
+
+            stacks = get_custom_card_value(
+                card,
+                selected_character,
+                "status_stacks",
+                card.get("status_stacks", 1)
+            )
+
+            fire_stacks = get_custom_card_value(
+                card,
+                selected_character,
+                "fire_stacks",
+                card.get("fire_stacks", stacks)
+            )
+
+            target_tiles = get_relative_custom_tiles_from_layer(
+                card,
+                selected_character,
+                effect.get("tiles_from", "hitbox_tiles")
+            )
+
+            if not target_tiles:
+                target_tiles = get_relative_custom_target_tiles(card, selected_character)
+
+            for row, col in target_tiles:
+                enemy = get_enemy_on_tile(enemies, row, col)
+
+                if enemy is not None:
+                    if status_name == "fire":
+                        enemy["fire_stacks"] = enemy.get("fire_stacks", 0) + fire_stacks
+                    else:
+                        enemy[status_name] = max(enemy.get(status_name, 0), duration)
+
         elif effect_type == "place_trap":
-            trap_damage = get_custom_card_value(card, selected_character, "damage", card.get("damage", 1))
+            trap_damage = get_custom_card_value(card, selected_character, "damage", card.get("damage", 0))
             trap_duration = get_custom_card_value(card, selected_character, "trap_duration", card.get("trap_duration", 3))
             trap_radius = get_custom_card_value(card, selected_character, "trap_radius", card.get("trap_radius", 1))
+            status_duration = get_custom_card_value(card, selected_character, "status_duration", card.get("status_duration", 1))
 
-            result["trap"] = {
-                "kind": "trap",
-                "row": selected_character["row"],
-                "col": selected_character["col"],
-                "damage": trap_damage,
-                "duration": trap_duration,
-                "radius": trap_radius,
-                "snare_until_gone": effect.get("snare_until_gone", False)
-            }
+            result["traps"] = result.get("traps", [])
+
+            trap_place_tiles = get_relative_custom_tiles_from_layer(
+                card,
+                selected_character,
+                effect.get("place_tiles_from", "trap_place_tiles")
+            )
+
+            trap_hitbox_tiles = get_relative_custom_tiles_from_layer(
+                card,
+                selected_character,
+                effect.get("trigger_tiles_from", "trap_hitbox_tiles")
+            )
+
+            if not trap_place_tiles:
+                trap_place_tiles = [(selected_character["row"], selected_character["col"])]
+
+            if not trap_hitbox_tiles:
+                trap_hitbox_tiles = trap_place_tiles
+
+            for row, col in trap_place_tiles:
+                result["traps"].append({
+                    "kind": "trap",
+                    "row": row,
+                    "col": col,
+                    "damage": trap_damage,
+                    "duration": trap_duration,
+                    "radius": trap_radius,
+                    "trigger_tiles": [
+                        {"row": trigger_row, "col": trigger_col}
+                        for trigger_row, trigger_col in trap_hitbox_tiles
+                    ],
+                    "status": effect.get("status"),
+                    "status_duration": status_duration,
+                    "snare_until_gone": effect.get("snare_until_gone", False)
+                })
+
+        elif effect_type == "place_fire_trap":
+            result["traps"] = result.get("traps", [])
+
+            trap_duration = get_custom_card_value(card, selected_character, "trap_duration", card.get("trap_duration", 3))
+            fire_stacks = get_custom_card_value(card, selected_character, "fire_stacks", card.get("fire_stacks", 1))
+
+            trap_place_tiles = get_relative_custom_tiles_from_layer(
+                card,
+                selected_character,
+                effect.get("place_tiles_from", "trap_place_tiles")
+            )
+
+            trap_hitbox_tiles = get_relative_custom_tiles_from_layer(
+                card,
+                selected_character,
+                effect.get("trigger_tiles_from", "trap_hitbox_tiles")
+            )
+
+            if not trap_place_tiles:
+                trap_place_tiles = [(selected_character["row"], selected_character["col"])]
+
+            if not trap_hitbox_tiles:
+                trap_hitbox_tiles = trap_place_tiles
+
+            for row, col in trap_hitbox_tiles:
+                result["traps"].append({
+                    "kind": "fire_floor",
+                    "row": row,
+                    "col": col,
+                    "duration": trap_duration,
+                    "fire_stacks_on_enter": fire_stacks,
+                    "entry_damage": effect.get("entry_damage", 2),
+                    "stay_damage": effect.get("stay_damage", 2),
+                    "source_place_tiles": [
+                        {"row": place_row, "col": place_col}
+                        for place_row, place_col in trap_place_tiles
+                    ]
+                })
 
     return result
 
