@@ -228,6 +228,12 @@ def trigger_enemy_traps(enemy, enemy_grid_data):
                     "damage": trap["damage"]
                 })
 
+                if trap.get("snare_until_gone", False):
+                    enemy["trapped"] = max(
+                        enemy.get("trapped", 0),
+                        trap.get("duration", 1)
+                    )
+
     return hits
 
 

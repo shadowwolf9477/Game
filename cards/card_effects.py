@@ -5,18 +5,15 @@ def character_can_use_card(character, card):
     if character is None or character["current_hp"] <= 0:
         return False
 
-    # A shielding character is committed to protecting and cannot act with cards.
     if character.get("shielding") is not None:
         return False
 
     if card["effect"] == "move" and character.get("snared", 0) > 0:
         return False
 
-    # Character-specific cards only allow named users.
     if "usable_characters" in card:
         return character["name"] in card["usable_characters"]
 
-    # Generic cards can allow broad tags like ranged, melee, tank, etc.
     if "usable_tags" in card:
         for tag in character["tags"]:
             if tag in card["usable_tags"]:
@@ -24,12 +21,10 @@ def character_can_use_card(character, card):
 
         return False
 
-    # Cards with no restrictions are neutral utility cards.
     return True
 
 
 def get_card_display_name(card, character):
-    # Some neutral cards get a different name depending on who uses them.
     if character is not None and "character_names" in card and character["name"] in card["character_names"]:
         return card["character_names"][character["name"]]
 
@@ -37,12 +32,25 @@ def get_card_display_name(card, character):
 
 
 def remove_dead_enemies(enemies):
-    # Mutate the existing list so main.py keeps pointing at the same enemies object.
     enemies[:] = [enemy for enemy in enemies if enemy["hp"] > 0]
 
 
+def damage_enemy(enemy, damage, hits):
+    enemy["hp"] -= damage
+    hits.append({
+        "target": enemy,
+        "damage": damage
+    })
+
+
+def get_character_attack_direction(character):
+    if character.get("flip_x", False):
+        return "back"
+
+    return "front"
+
+
 def play_basic_attack(card, selected_character, enemies):
-    # Basic Attack changes shape depending on who uses it.
     player_row = selected_character["row"]
     player_col = selected_character["col"]
     hits = []
@@ -84,23 +92,14 @@ def play_basic_attack(card, selected_character, enemies):
     }
 
 
-def get_character_attack_direction(character):
-    if character.get("flip_x", False):
-        return "back"
-
-    return "front"
-
-
-
 def play_pierce_row(card, selected_character, enemies):
-    # Pierce rewards lined-up enemies by hitting several targets in the row.
     targets_hit = 0
     max_targets = card["max_targets"]
     attack_range = card.get("range", GRID_COLS)
     hits = []
     target_columns = []
 
-    for distance in range(1,attack_range+1):
+    for distance in range(1, attack_range + 1):
         enemy_col = selected_character["col"] + distance
 
         if enemy_col < GRID_COLS:
@@ -121,7 +120,6 @@ def play_pierce_row(card, selected_character, enemies):
 
 
 def play_cleave_column(card, selected_character, enemies):
-    # Cleave is a side swing. Total damage is split, with the first target hit hardest.
     swing_direction = card.get("swing_direction", "right")
     swing_tiles = get_warrior_swing_tiles(selected_character, swing_direction)
     hits = []
@@ -227,8 +225,6 @@ def split_degrading_damage(total_damage, target_count):
     extra_damage = total_damage % target_count
     damages = []
 
-    # Cleave splits its current damage across targets. Earlier targets in the
-    # chosen swing order get leftover damage, so upgrades still scale cleanly.
     for target_index in range(target_count):
         damage = base_damage
 
@@ -240,16 +236,7 @@ def split_degrading_damage(total_damage, target_count):
     return damages
 
 
-def damage_enemy(enemy, damage, hits):
-    enemy["hp"] -= damage
-    hits.append({
-        "target": enemy,
-        "damage": damage
-    })
-
-
 def start_move_card(card, selected_character, enemies):
-    # Movement cards are paid/discarded first, then main.py previews the path.
     return "movement"
 
 
@@ -299,7 +286,133 @@ def get_enemy_directly_ahead(selected_character, enemies):
     return None
 
 
-# Card effect IDs from card_library.py are looked up here.
+def get_custom_card_value(card, selected_character, value_name, default=0):
+    character_values = card.get("character_values", {})
+    character_name = selected_character["name"]
+
+    if character_name in character_values:
+        if value_name in character_values[character_name]:
+            return character_values[character_name][value_name]
+
+    return card.get(value_name, default)
+
+
+def get_custom_preview_tile(card, selected_character):
+    return card.get("player_preview_tile", {
+        "row": selected_character["row"],
+        "col": selected_character["col"]
+    })
+
+
+def get_relative_custom_target_tiles(card, selected_character):
+    target_tiles = []
+    preview_tile = get_custom_preview_tile(card, selected_character)
+
+    for tile in card.get("target_tiles", []):
+        row_offset = tile["row"] - preview_tile["row"]
+        col_offset = tile["col"] - preview_tile["col"]
+
+        if selected_character.get("flip_x", False):
+            col_offset *= -1
+
+        row = selected_character["row"] + row_offset
+        col = selected_character["col"] + col_offset
+
+        if 0 <= row < GRID_ROWS and 0 <= col < GRID_COLS:
+            target_tiles.append((row, col))
+
+    return target_tiles
+
+
+def get_enemy_on_tile(enemies, row, col):
+    for enemy in enemies:
+        if enemy["row"] == row and enemy["col"] == col:
+            return enemy
+
+    return None
+
+
+def get_first_enemy_on_custom_tiles(card, selected_character, enemies):
+    target_tiles = get_relative_custom_target_tiles(card, selected_character)
+
+    for row, col in target_tiles:
+        enemy = get_enemy_on_tile(enemies, row, col)
+
+        if enemy is not None:
+            return enemy
+
+    return None
+
+
+def run_custom_card_effect(card, selected_character, enemies):
+    hits = []
+    result = {
+        "hits": hits
+    }
+
+    for effect in card.get("effects", []):
+        effect_type = effect.get("type")
+
+        if effect_type == "damage":
+            amount = get_custom_card_value(card, selected_character, "damage", card.get("damage", 0))
+            target_tiles = get_relative_custom_target_tiles(card, selected_character)
+
+            for row, col in target_tiles:
+                enemy = get_enemy_on_tile(enemies, row, col)
+
+                if enemy is not None:
+                    damage_enemy(enemy, amount, hits)
+
+        elif effect_type == "gain_block":
+            amount = get_custom_card_value(card, selected_character, "block", card.get("block", 0))
+            selected_character["block"] = selected_character.get("block", 0) + amount
+
+        elif effect_type == "draw_cards":
+            amount = get_custom_card_value(card, selected_character, "draw", card.get("draw", 0))
+            result["draw_cards"] = amount
+
+        elif effect_type == "discard_cards":
+            amount = get_custom_card_value(card, selected_character, "discard", card.get("discard", 0))
+            result["discard_cards"] = amount
+            result["discard_prompt"] = "Discard a card"
+
+        elif effect_type == "move_character":
+            return "movement"
+
+        elif effect_type == "charge_character":
+            distance = get_custom_card_value(card, selected_character, "move_distance", card.get("move_distance", 1))
+            result["move_range"] = distance
+            result["start_move"] = True
+
+        elif effect_type == "shove":
+            target = get_first_enemy_on_custom_tiles(card, selected_character, enemies)
+
+            if target is None:
+                continue
+
+            distance = get_custom_card_value(card, selected_character, "shove_distance", card.get("shove_distance", 1))
+
+            result["shove_target"] = target
+            result["push_range"] = distance
+
+        elif effect_type == "place_trap":
+            trap_damage = get_custom_card_value(card, selected_character, "damage", card.get("damage", 1))
+            trap_duration = get_custom_card_value(card, selected_character, "trap_duration", card.get("trap_duration", 3))
+            trap_radius = get_custom_card_value(card, selected_character, "trap_radius", card.get("trap_radius", 1))
+
+            result["trap"] = {
+                "kind": "trap",
+                "row": selected_character["row"],
+                "col": selected_character["col"],
+                "damage": trap_damage,
+                "duration": trap_duration,
+                "radius": trap_radius,
+                "snare_until_gone": effect.get("snare_until_gone", False)
+            }
+
+    return result
+
+
 CARD_EFFECTS = {
     "basic_attack": play_basic_attack,
     "pierce_row": play_pierce_row,
@@ -307,7 +420,8 @@ CARD_EFFECTS = {
     "move": start_move_card,
     "deep_breath": play_deep_breath,
     "shove": start_shove_card,
-    "trap": place_trap_card
+    "trap": place_trap_card,
+    "custom_card": run_custom_card_effect
 }
 
 
@@ -315,13 +429,11 @@ def play_card(card, selected_character, enemies, current_energy):
     if not character_can_use_card(selected_character, card):
         return False, current_energy, None
 
-    # Stop early if the player cannot afford the selected card.
     if current_energy < card["cost"]:
         return False, current_energy, None
 
     effect_name = card["effect"]
 
-    # Unknown effects fail safely instead of crashing the battle loop.
     if effect_name not in CARD_EFFECTS:
         return False, current_energy, None
 
@@ -332,6 +444,9 @@ def play_card(card, selected_character, enemies, current_energy):
     result = effect_function(card, selected_character, enemies)
 
     if effect_name == "shove" and result is None:
+        return False, current_energy + card["cost"], None
+
+    if effect_name == "custom_card" and result is None:
         return False, current_energy + card["cost"], None
 
     return True, current_energy, result

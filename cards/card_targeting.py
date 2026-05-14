@@ -2,17 +2,18 @@ from settings import GRID_ROWS, GRID_COLS
 
 
 def get_card_preview_tiles(card, selected_character, swing_direction="right", attack_direction=None):
-    # Return enemy-board preview tiles for the selected attack card.
     if card is None or selected_character is None:
         return []
 
+    if card["effect"] == "custom_card":
+        return get_custom_card_preview_tiles(card, selected_character)
+
     if card["effect"] == "pierce_row":
-        # Pierce previews its limited row range because it can hit multiple enemies there.
         player_row = selected_character["row"]
         player_col = selected_character["col"]
         preview_tiles = []
 
-        for distance in range(card.get("range", GRID_COLS)):
+        for distance in range(1, card.get("range", GRID_COLS) + 1):
             enemy_col = player_col + distance
 
             if enemy_col < GRID_COLS:
@@ -32,18 +33,14 @@ def get_card_preview_tiles(card, selected_character, swing_direction="right", at
             preview_tiles = get_warrior_basic_attack_tiles(selected_character, attack_direction)
 
         else:
-            # Basic shots start one tile away and follow the character's facing.
-            directions = [attack_direction]
+            for distance in range(1, card["range"] + 1):
+                if attack_direction == "back":
+                    enemy_col = player_col - distance
+                else:
+                    enemy_col = player_col + distance
 
-            for direction in directions:
-                for distance in range(1, card["range"] + 1):
-                    if direction == "back":
-                        enemy_col = player_col - distance
-                    else:
-                        enemy_col = player_col + distance
-
-                    if 0 <= enemy_col < GRID_COLS:
-                        preview_tiles.append((player_row, enemy_col))
+                if 0 <= enemy_col < GRID_COLS:
+                    preview_tiles.append((player_row, enemy_col))
 
         return preview_tiles
 
@@ -79,9 +76,32 @@ def get_card_preview_tiles(card, selected_character, swing_direction="right", at
 
         return preview_tiles
 
-    # Movement and unsupported cards do not preview enemy tiles.
     return []
 
+
+def get_custom_card_preview_tiles(card, selected_character):
+    preview_tiles = []
+
+    preview_tile = card.get("player_preview_tile", {
+        "row": selected_character["row"],
+        "col": selected_character["col"]
+    })
+
+    for tile in card.get("target_tiles", []):
+        row_offset = tile["row"] - preview_tile["row"]
+        col_offset = tile["col"] - preview_tile["col"]
+
+        # Flip horizontally if character is flipped
+        if selected_character.get("flip_x", False):
+            col_offset *= -1
+
+        row = selected_character["row"] + row_offset
+        col = selected_character["col"] + col_offset
+
+        if 0 <= row < GRID_ROWS and 0 <= col < GRID_COLS:
+            preview_tiles.append((row, col))
+
+    return preview_tiles
 
 def get_character_attack_direction(character):
     if character.get("flip_x", False):
@@ -122,28 +142,23 @@ def get_warrior_basic_attack_tiles(selected_character, attack_direction):
     player_row = selected_character["row"]
     player_col = selected_character["col"]
     preview_tiles = []
-    directions = ["front", "back"]
 
-    if attack_direction is not None:
-        directions = [attack_direction]
+    if attack_direction == "back":
+        target_col = max(0, player_col - 1)
+    else:
+        target_col = min(GRID_COLS - 1, player_col + 1)
 
-    for direction in directions:
-        if direction == "back":
-            target_col = max(0, player_col - 1)
-        else:
-            target_col = min(GRID_COLS - 1, player_col + 1)
+    if target_col == player_col and 0 < player_col < GRID_COLS - 1:
+        return preview_tiles
 
-        if target_col == player_col and 0 < player_col < GRID_COLS - 1:
-            continue
+    target_rows = [player_row]
 
-        target_rows = [player_row]
+    if player_row - 1 >= 0:
+        target_rows.append(player_row - 1)
+    elif player_row + 1 < GRID_ROWS:
+        target_rows.append(player_row + 1)
 
-        if player_row - 1 >= 0:
-            target_rows.append(player_row - 1)
-        elif player_row + 1 < GRID_ROWS:
-            target_rows.append(player_row + 1)
-
-        for row in target_rows:
-            preview_tiles.append((row, target_col))
+    for row in target_rows:
+        preview_tiles.append((row, target_col))
 
     return preview_tiles

@@ -124,3 +124,6 @@ CARD_LIBRARY = {
     }
 
 }
+from cards.custom_card_loader import load_custom_cards
+
+CARD_LIBRARY.update(load_custom_cards())

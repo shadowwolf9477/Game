@@ -1,5 +1,7 @@
 import pygame
 import random
+import subprocess
+import sys
 
 from button import Button
 from settings import (
@@ -20,6 +22,17 @@ from settings import (
     CARD_WIDTH,
     CARD_HEIGHT,
     CARD_GAP
+)
+from dev_menu import (
+    toggle_dev_menu,
+    dev_menu_is_open,
+    draw_dev_menu,
+    instant_kill_all_enemies,
+    instant_kill_first_enemy,
+    add_card_to_hand,
+    add_card_to_deck,
+    get_custom_card_ids,
+    get_battle_room_files
 )
 from state.game_state import HOME_MENU, BATTLE, CHARACTER_SELECT, PLAYER_TURN, ENEMY_TURN, GAME_OVER, MAP, REWARD
 from cards.card_sleeves import CARD_SLEEVES
@@ -116,12 +129,17 @@ font = pygame.font.Font(None, 50)
 small_font = pygame.font.Font(None, 34)
 battle_sounds = load_battle_sounds()
 
-
+dev_buttons = []
+selected_dev_card_index = 0
+selected_battle_index = 0
 
 # Shared menu and battle buttons.
 # These are created once and reused while the game changes screen states.
 start_button = Button(500, 220, 220, 70, "Start")
-quit_button = Button(500, 310, 220, 70, "Quit")
+
+card_editor_button = Button(500, 310, 220, 70, "Card Editor")
+
+quit_button = Button(500, 400, 220, 70, "Quit")
 
 archer_button = Button(450, 330, 330, 70, "Archer + Warrior")
 
@@ -1267,7 +1285,9 @@ while running:
 
                 if target_pile_scroll_y > max_scroll:
                     target_pile_scroll_y = max_scroll
-        if event.type == pygame.KEYDOWN:
+        if event.type == pygame.KEYDOWN:    
+            if event.key == pygame.K_7 and (event.mod & pygame.KMOD_ALT):
+                toggle_dev_menu()
             if current_state == BATTLE and reaction_mode:
                 if event.key == pygame.K_g:
                     reaction_mode = False
@@ -1375,13 +1395,59 @@ while running:
                     continue
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if dev_menu_is_open():
+                    for button in dev_buttons:
+                        if button.clicked(event.pos):
+                            action = button.action
+
+                            if action == "kill_first":
+                                instant_kill_first_enemy(enemies)
+                                handle_enemy_deaths(enemies, enemy_grid_data)
+
+                            elif action == "kill_all":
+                                instant_kill_all_enemies(enemies)
+                                handle_enemy_deaths(enemies, enemy_grid_data)
+
+                            elif action == "prev_card":
+                                selected_dev_card_index -= 1
+
+                            elif action == "next_card":
+                                selected_dev_card_index += 1
+
+                            elif action == "add_hand":
+                                custom_cards = get_custom_card_ids()
+                                if custom_cards:
+                                    card_id = custom_cards[selected_dev_card_index % len(custom_cards)]
+                                    add_card_to_hand(card_id, player_hand, CARD_LIBRARY)
+
+                            elif action == "add_deck":
+                                custom_cards = get_custom_card_ids()
+                                if custom_cards:
+                                    card_id = custom_cards[selected_dev_card_index % len(custom_cards)]
+                                    add_card_to_deck(card_id, player_deck, CARD_LIBRARY)
+
+                            elif action == "prev_battle":
+                                selected_battle_index -= 1
+
+                            elif action == "next_battle":
+                                selected_battle_index += 1
+
+                            elif action == "load_battle":
+                                print("Battle loading button pressed. Hook this to your JSON battle loader.")
+
+                    continue
             if current_state == HOME_MENU:
                 # Home menu only chooses between leaving or character select.
-                if quit_button.is_clicked(event.pos):
-                    running = False
 
                 if start_button.is_clicked(event.pos):
                     current_state = CHARACTER_SELECT
+
+                if card_editor_button.is_clicked(event.pos):
+                    subprocess.Popen([sys.executable, "cards/custom_card_editor.py"])
+
+                if quit_button.is_clicked(event.pos):
+                    running = False
 
             if current_state == CHARACTER_SELECT:
                 if archer_button.is_clicked(event.pos):
@@ -1752,6 +1818,7 @@ while running:
         # Home menu draws only the global Start/Quit choices.
         start_button.draw(screen, font)
         quit_button.draw(screen, font)
+        card_editor_button.draw(screen,font)
 
     if current_state == CHARACTER_SELECT:
         # Character select currently starts the fixed Archer + Warrior party.
@@ -1941,6 +2008,16 @@ while running:
             enemy_preview_tiles,
             enemy_movement_preview_tiles
         )
+        if dev_menu_is_open():
+            dev_buttons = draw_dev_menu(
+                screen,
+                enemies,
+                player_hand,
+                player_deck,
+                CARD_LIBRARY,
+                selected_dev_card_index,
+                selected_battle_index
+            )
 
         draw_enemy_death_animations(screen, enemy_death_animations)
         draw_projectile_animations(screen, projectile_animations)

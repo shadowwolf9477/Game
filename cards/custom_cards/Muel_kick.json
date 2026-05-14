@@ -1,0 +1,67 @@
+{
+    "id": "Muel_kick",
+    "name": "Muel kick",
+    "cost": 2,
+    "thickness": 0.5,
+    "type": "attack",
+    "rarity": "uncommon",
+    "image_path": "assets/card_templtes/card art/\"mule_kick.jpg\"",
+    "damage": 6,
+    "block": 0,
+    "draw": 0,
+    "discard": 0,
+    "move_distance": 0,
+    "shove_distance": 2,
+    "trap_duration": 0,
+    "trap_radius": 0,
+    "description": "Kick a enemy behing you deal {damage} and shove {shove_distance}",
+    "usable_characters": [
+        "Archer",
+        "Warrior"
+    ],
+    "player_preview_tile": {
+        "row": 1,
+        "col": 2
+    },
+    "target_tiles": [
+        {
+            "row": 1,
+            "col": 1
+        }
+    ],
+    "effects": [
+        {
+            "type": "damage",
+            "amount_from": "damage",
+            "target_tiles_from_card": true
+        },
+        {
+            "type": "shove",
+            "distance_from": "shove_distance",
+            "direction": "any"
+        }
+    ],
+    "character_values": {
+        "Archer": {
+            "damage": 6,
+            "block": 0,
+            "draw": 0,
+            "discard": 0,
+            "move_distance": 1,
+            "shove_distance": 2,
+            "trap_duration": 3,
+            "trap_radius": 1
+        },
+        "Warrior": {
+            "damage": 9,
+            "block": 0,
+            "draw": 0,
+            "discard": 0,
+            "move_distance": 1,
+            "shove_distance": 3,
+            "trap_duration": 3,
+            "trap_radius": 1
+        }
+    },
+    "preview_description": "Kick a enemy behing you deal 6 and shove 2"
+}

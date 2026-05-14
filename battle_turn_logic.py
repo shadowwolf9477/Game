@@ -51,6 +51,10 @@ def build_enemy_movement_queue(enemies, enemy_grid_data, party):
         else:
             enemy["turns_until_attack"] -= 1
 
+        if enemy.get("trapped", 0) > 0:
+            enemy["trapped"] -= 1
+            continue
+
         if enemy["type"] == "orc":
             if enemy_attacked:
                 movement_queue.extend(get_orc_knight_movement_steps(enemy, enemy_grid_data))
