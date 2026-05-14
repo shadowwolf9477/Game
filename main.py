@@ -115,6 +115,7 @@ from cards.card_renderer import draw_card_hand, get_clicked_card_index, get_comp
 from cards.card_effects import play_card, play_reaction_card, get_reaction_cost
 from cards.card_targeting import get_card_preview_tiles
 from cards.player_deck import build_starting_deck, shuffle_deck, draw_cards
+from cards.card_library import CARD_LIBRARY
 
 
 # Pygame setup.
@@ -219,7 +220,9 @@ shove_steps_left = 0
 shove_preview_path = []
 shove_preview_row = 0
 shove_preview_col = 0
-
+shove_animation_queue = []
+shove_animation_timer = 0
+shove_animation_speed = 10
 # Enemy reaction state.
 # Enemies move one board tile at a time, which can open reaction windows.
 enemy_movement_queue = []
@@ -1040,8 +1043,13 @@ def get_shove_preview_tiles():
 
 
 def confirm_shove():
+    global shove_animation_queue
+    global shove_animation_timer
+
     if not shove_mode or shove_target is None or not shove_preview_path:
         return False
+
+    shove_animation_queue = []
 
     last_row = shove_target["row"]
     last_col = shove_target["col"]
@@ -1053,17 +1061,21 @@ def confirm_shove():
         if abs(row_change) + abs(col_change) != 1:
             break
 
-        if not move_unit(shove_target, enemy_grid_data, row_change, col_change):
-            break
+        shove_animation_queue.append({
+            "enemy": shove_target,
+            "row_change": row_change,
+            "col_change": col_change
+        })
 
-        last_row = shove_target["row"]
-        last_col = shove_target["col"]
+        last_row = next_row
+        last_col = next_col
 
-    finish_shove()
+    shove_animation_timer = 0
+    clear_shove_preview_only()
+
     return True
 
-
-def finish_shove():
+def clear_shove_preview_only():
     global shove_mode
     global shove_target
     global shove_card_user
@@ -1072,17 +1084,6 @@ def finish_shove():
     global shove_preview_row
     global shove_preview_col
 
-    trap_hits = []
-
-    if shove_target in enemies:
-        trap_hits = trigger_enemy_traps(shove_target, enemy_grid_data)
-
-    if trap_hits:
-        add_damage_popups_from_hits(trap_hits, "enemy")
-        queue_enemy_death_animations(enemies, enemy_death_animations)
-        handle_enemy_deaths(enemies, enemy_grid_data)
-        clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
-
     shove_mode = False
     shove_target = None
     shove_card_user = None
@@ -1090,9 +1091,24 @@ def finish_shove():
     shove_preview_path = []
     shove_preview_row = 0
     shove_preview_col = 0
-    shove_preview_path = []
-    shove_preview_row = 0
-    shove_preview_col = 0
+
+def finish_shove(enemy_that_was_shoved=None):
+    global shove_animation_queue
+    global shove_animation_timer
+
+    trap_hits = []
+
+    if enemy_that_was_shoved is not None and enemy_that_was_shoved in enemies:
+        trap_hits = trigger_enemy_traps(enemy_that_was_shoved, enemy_grid_data)
+
+    if trap_hits:
+        add_damage_popups_from_hits(trap_hits, "enemy")
+        queue_enemy_death_animations(enemies, enemy_death_animations)
+        handle_enemy_deaths(enemies, enemy_grid_data)
+        clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
+
+    shove_animation_queue = []
+    shove_animation_timer = 0
 
     if len(enemies) == 0:
         queue_reward_after_battle()
@@ -1807,7 +1823,30 @@ while running:
     update_projectile_animations(projectile_animations)
     update_party_death_animations(party)
     player_attack_animation = update_player_attack_animation(player_attack_animation)
+    if shove_animation_queue:
+        shove_animation_timer += 1
 
+    if shove_animation_timer >= shove_animation_speed:
+        shove_animation_timer = 0
+        shove_step = shove_animation_queue.pop(0)
+        shoved_enemy = shove_step["enemy"]
+
+        if shoved_enemy in enemies:
+            moved = move_unit(
+                shoved_enemy,
+                enemy_grid_data,
+                shove_step["row_change"],
+                shove_step["col_change"]
+            )
+
+            if not moved:
+                shove_animation_queue = []
+
+            if not shove_animation_queue:
+                finish_shove(shoved_enemy)
+        else:
+            shove_animation_queue = []
+            shove_animation_timer = 0
     if pending_reward_after_deaths and not enemy_death_animations:
         pending_reward_after_deaths = False
         current_state = REWARD
@@ -2008,16 +2047,6 @@ while running:
             enemy_preview_tiles,
             enemy_movement_preview_tiles
         )
-        if dev_menu_is_open():
-            dev_buttons = draw_dev_menu(
-                screen,
-                enemies,
-                player_hand,
-                player_deck,
-                CARD_LIBRARY,
-                selected_dev_card_index,
-                selected_battle_index
-            )
 
         draw_enemy_death_animations(screen, enemy_death_animations)
         draw_projectile_animations(screen, projectile_animations)
@@ -2088,7 +2117,16 @@ while running:
             deck_scroll_y,
             selected_sleeve,
             can_apply_sleeve)
-
+    if dev_menu_is_open():
+        dev_buttons = draw_dev_menu(
+            screen,
+            enemies,
+            player_hand,
+            player_deck,
+            CARD_LIBRARY,
+            selected_dev_card_index,
+            selected_battle_index
+        )
 
 
     pygame.display.flip()

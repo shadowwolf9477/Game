@@ -581,7 +581,13 @@ def resolve_enemy_incoming_attacks(enemy, party, player_grid_data):
 
             damage_target = get_shielding_character(party, character)
             damage = sum(attack["damage"] for attack in matching_attacks)
-            damage = get_shielded_damage(damage_target, damage)
+
+            damage = get_shielded_damage(
+                damage_target,
+                character,
+                damage
+            )
+
             damage = apply_block_to_damage(damage_target, damage)
 
             damage_target["current_hp"] -= damage
@@ -645,7 +651,13 @@ def get_shielding_character(party, protected_character):
     return protected_character
 
 
-def get_shielded_damage(damage_target, damage):
+def get_shielded_damage(damage_target, protected_character, damage):
+    # Warrior passive only reduces damage taken FOR allies.
+    # Direct hits to the Warrior are full damage.
+
+    if damage_target is protected_character:
+        return damage
+
     if damage_target["name"] != "Warrior":
         return damage
 

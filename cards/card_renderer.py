@@ -4,7 +4,6 @@ from cards.card_effects import get_card_display_name
 from loaders.asset_paths import asset_path
 
 
-# Stores loaded/scaled card images so card art is not reloaded every frame.
 CARD_IMAGE_CACHE = {}
 COMPOSED_CARD_CACHE = {}
 
@@ -17,14 +16,12 @@ def card_has_sleeve(card):
 
 
 def draw_sleeve_outline(screen, card_rect):
-    # Sleeved cards get a cyan frame so upgrades are visible in hand and rewards.
     pygame.draw.rect(screen, SLEEVE_BLUE, card_rect, 4)
     inner_rect = card_rect.inflate(-10, -10)
     pygame.draw.rect(screen, (170, 225, 255), inner_rect, 2)
 
 
 def get_card_image(image_path, size):
-    # Cache key includes size because the hand and hover preview use different scales.
     cache_key = (image_path, size)
 
     if cache_key not in CARD_IMAGE_CACHE:
@@ -52,138 +49,37 @@ def get_card_image_path(card, character=None):
     return card.get("image_path")
 
 
-def draw_text_card(screen, font, card, character, x, y, width, height):
-    # Temporary fallback for cards that do not have art yet.
-    card_rect = pygame.Rect(x, y, width, height)
-    pygame.draw.rect(screen, (30, 30, 40), card_rect)
-    if card_has_sleeve(card):
-        draw_sleeve_outline(screen, card_rect)
-    else:
-        pygame.draw.rect(screen, WHITE, card_rect, 2)
-
-    card_name = card["name"]
+def get_dynamic_card_value(card, character, value_name, default=0):
+    character_values = card.get("character_values", {})
 
     if character is not None:
-        card_name = get_card_display_name(card, character)
+        character_name = character.get("name")
 
-    card_font = pygame.font.Font(None, 30)
-    small_card_font = pygame.font.Font(None, 26)
+        if character_name in character_values:
+            if value_name in character_values[character_name]:
+                return character_values[character_name][value_name]
 
-    name_text = card_font.render(card_name, True, WHITE)
-    cost_text = small_card_font.render("Cost " + str(card["cost"]), True, WHITE)
-
-    screen.blit(name_text, (x + 8, y + 14))
-    screen.blit(cost_text, (x + 8, y + 58))
-
-    if "damage" in card:
-        damage_text = small_card_font.render("Dmg " + str(card["damage"]), True, WHITE)
-        screen.blit(damage_text, (x + 8, y + 96))
-
-    type_text = small_card_font.render(card["type"], True, WHITE)
-    screen.blit(type_text, (x + 8, y + height - 34))
+    return card.get(value_name, default)
 
 
-def get_composed_card_image(card, character, size):
-    display_name = get_card_display_name(card, character)
-    image_path = get_card_image_path(card, character)
-    cache_key = (
-        id(card),
-        display_name,
-        card.get("cost"),
-        card.get("damage"),
-        card.get("range"),
-        card.get("max_targets"),
-        card.get("move_range"),
-        card.get("type"),
-        image_path,
-        size
-    )
+def replace_description_variables(description, card, character):
+    replacements = {
+        "{damage}": get_dynamic_card_value(card, character, "damage", 0),
+        "{block}": get_dynamic_card_value(card, character, "block", 0),
+        "{draw}": get_dynamic_card_value(card, character, "draw", 0),
+        "{discard}": get_dynamic_card_value(card, character, "discard", 0),
+        "{move_distance}": get_dynamic_card_value(card, character, "move_distance", 0),
+        "{shove_distance}": get_dynamic_card_value(card, character, "shove_distance", 0),
+        "{trap_duration}": get_dynamic_card_value(card, character, "trap_duration", 0),
+        "{trap_radius}": get_dynamic_card_value(card, character, "trap_radius", 0),
+        "{cost}": card.get("cost", 0),
+        "{thickness}": card.get("thickness", 0),
+    }
 
-    if cache_key not in COMPOSED_CARD_CACHE:
-        COMPOSED_CARD_CACHE[cache_key] = compose_card_image(card, character, size)
+    for variable_name, value in replacements.items():
+        description = description.replace(variable_name, str(value))
 
-    return COMPOSED_CARD_CACHE[cache_key]
-
-
-def compose_card_image(card, character, size):
-    template = get_card_image(get_card_template_path(card), size).copy()
-    width, height = size
-
-    draw_card_art(template, card, character, width, height)
-    draw_card_cost(template, card, width, height)
-    draw_card_name(template, card, character, width, height)
-    draw_card_description(template, card, character, width, height)
-
-    return template
-
-
-def draw_card_art(card_surface, card, character, width, height):
-    image_path = get_card_image_path(card, character)
-
-    if image_path is None:
-        return
-
-    art_rect = pygame.Rect(
-        int(width * 0.15),
-        int(height * 0.19),
-        int(width * 0.72),
-        int(height * 0.31)
-    )
-
-    art_image = pygame.image.load(asset_path(image_path)).convert_alpha()
-    art_image = scale_image_to_cover(art_image, art_rect.size)
-    art_x = art_rect.x + (art_rect.width - art_image.get_width()) // 2
-    art_y = art_rect.y + (art_rect.height - art_image.get_height()) // 2
-
-    clip_rect = card_surface.get_clip()
-    card_surface.set_clip(art_rect)
-    card_surface.blit(art_image, (art_x, art_y))
-    card_surface.set_clip(clip_rect)
-
-
-def scale_image_to_cover(image, target_size):
-    target_width, target_height = target_size
-    width_ratio = target_width / image.get_width()
-    height_ratio = target_height / image.get_height()
-    scale = max(width_ratio, height_ratio)
-    scaled_size = (
-        max(1, int(image.get_width() * scale)),
-        max(1, int(image.get_height() * scale))
-    )
-
-    return pygame.transform.smoothscale(image, scaled_size)
-
-
-def draw_card_cost(card_surface, card, width, height):
-    cost_font = pygame.font.Font(None, max(20, int(height * 0.14)))
-    cost_text = render_text_with_outline(str(card["cost"]), cost_font, WHITE, (85, 35, 20), 2)
-    cost_rect = cost_text.get_rect(center=(int(width * 0.095), int(height * 0.08)))
-    card_surface.blit(cost_text, cost_rect)
-
-
-def draw_card_name(card_surface, card, character, width, height):
-    card_name = get_card_display_name(card, character)
-    name_font = pygame.font.Font(None, max(18, int(height * 0.088)))
-    draw_text_fit_center(
-        card_surface,
-        card_name,
-        name_font,
-        pygame.Rect(int(width * 0.19), int(height * 0.045), int(width * 0.66), int(height * 0.075)),
-        WHITE,
-        (60, 25, 25)
-    )
-
-
-def draw_card_description(card_surface, card, character, width, height):
-    description = build_card_description(card, character)
-    desc_font = pygame.font.Font(None, max(15, int(height * 0.069)))
-    desc_rect = pygame.Rect(
-        int(width * 0.14),
-        int(height * 0.64),
-        int(width * 0.72),
-        int(height * 0.24)
-    )
-    draw_wrapped_text(card_surface, description, desc_font, desc_rect, WHITE, (35, 25, 25))
+    return description
 
 
 def build_card_description(card, character):
@@ -218,7 +114,166 @@ def build_card_description(card, character):
         damage = card.get("character_damage", {}).get("Archer", card["damage"])
         return "Deal " + str(damage) + " damage. Range " + str(card["range"]) + " in faced direction. Hits 1."
 
-    return card.get("description", "")
+    return replace_description_variables(card.get("description", ""), card, character)
+
+
+def draw_text_card(screen, font, card, character, x, y, width, height):
+    card_rect = pygame.Rect(x, y, width, height)
+    pygame.draw.rect(screen, (30, 30, 40), card_rect)
+
+    if card_has_sleeve(card):
+        draw_sleeve_outline(screen, card_rect)
+    else:
+        pygame.draw.rect(screen, WHITE, card_rect, 2)
+
+    card_name = card["name"]
+
+    if character is not None:
+        card_name = get_card_display_name(card, character)
+
+    card_font = pygame.font.Font(None, 30)
+    small_card_font = pygame.font.Font(None, 26)
+
+    name_text = card_font.render(card_name, True, WHITE)
+    cost_text = small_card_font.render("Cost " + str(card["cost"]), True, WHITE)
+
+    screen.blit(name_text, (x + 8, y + 14))
+    screen.blit(cost_text, (x + 8, y + 58))
+
+    damage = get_dynamic_card_value(card, character, "damage", card.get("damage", 0))
+
+    if "damage" in card:
+        damage_text = small_card_font.render("Dmg " + str(damage), True, WHITE)
+        screen.blit(damage_text, (x + 8, y + 96))
+
+    type_text = small_card_font.render(card["type"], True, WHITE)
+    screen.blit(type_text, (x + 8, y + height - 34))
+
+
+def get_composed_card_image(card, character, size):
+    display_name = get_card_display_name(card, character)
+    image_path = get_card_image_path(card, character)
+
+    character_name = None
+    if character is not None:
+        character_name = character.get("name")
+
+    dynamic_description = build_card_description(card, character)
+
+    cache_key = (
+        id(card),
+        character_name,
+        display_name,
+        dynamic_description,
+        card.get("cost"),
+        card.get("damage"),
+        card.get("block"),
+        card.get("draw"),
+        card.get("discard"),
+        card.get("range"),
+        card.get("max_targets"),
+        card.get("move_range"),
+        card.get("move_distance"),
+        card.get("shove_distance"),
+        card.get("trap_duration"),
+        card.get("trap_radius"),
+        card.get("type"),
+        image_path,
+        size
+    )
+
+    if cache_key not in COMPOSED_CARD_CACHE:
+        COMPOSED_CARD_CACHE[cache_key] = compose_card_image(card, character, size)
+
+    return COMPOSED_CARD_CACHE[cache_key]
+
+
+def compose_card_image(card, character, size):
+    template = get_card_image(get_card_template_path(card), size).copy()
+    width, height = size
+
+    draw_card_art(template, card, character, width, height)
+    draw_card_cost(template, card, width, height)
+    draw_card_name(template, card, character, width, height)
+    draw_card_description(template, card, character, width, height)
+
+    return template
+
+
+def draw_card_art(card_surface, card, character, width, height):
+    image_path = get_card_image_path(card, character)
+
+    if image_path is None or image_path == "":
+        return
+
+    art_rect = pygame.Rect(
+        int(width * 0.15),
+        int(height * 0.19),
+        int(width * 0.72),
+        int(height * 0.31)
+    )
+
+    try:
+        art_image = pygame.image.load(asset_path(image_path)).convert_alpha()
+    except Exception as error:
+        print("Could not load card art:", image_path, error)
+        return
+
+    art_image = scale_image_to_cover(art_image, art_rect.size)
+    art_x = art_rect.x + (art_rect.width - art_image.get_width()) // 2
+    art_y = art_rect.y + (art_rect.height - art_image.get_height()) // 2
+
+    clip_rect = card_surface.get_clip()
+    card_surface.set_clip(art_rect)
+    card_surface.blit(art_image, (art_x, art_y))
+    card_surface.set_clip(clip_rect)
+
+
+def scale_image_to_cover(image, target_size):
+    target_width, target_height = target_size
+    width_ratio = target_width / image.get_width()
+    height_ratio = target_height / image.get_height()
+    scale = max(width_ratio, height_ratio)
+    scaled_size = (
+        max(1, int(image.get_width() * scale)),
+        max(1, int(image.get_height() * scale))
+    )
+
+    return pygame.transform.smoothscale(image, scaled_size)
+
+
+def draw_card_cost(card_surface, card, width, height):
+    cost_font = pygame.font.Font(None, max(20, int(height * 0.14)))
+    cost_text = render_text_with_outline(str(card["cost"]), cost_font, WHITE, (85, 35, 20), 2)
+    cost_rect = cost_text.get_rect(center=(int(width * 0.095), int(height * 0.08)))
+    card_surface.blit(cost_text, cost_rect)
+
+
+def draw_card_name(card_surface, card, character, width, height):
+    card_name = get_card_display_name(card, character)
+    name_font = pygame.font.Font(None, max(18, int(height * 0.088)))
+
+    draw_text_fit_center(
+        card_surface,
+        card_name,
+        name_font,
+        pygame.Rect(int(width * 0.19), int(height * 0.045), int(width * 0.66), int(height * 0.075)),
+        WHITE,
+        (60, 25, 25)
+    )
+
+
+def draw_card_description(card_surface, card, character, width, height):
+    description = build_card_description(card, character)
+    desc_font = pygame.font.Font(None, max(15, int(height * 0.069)))
+    desc_rect = pygame.Rect(
+        int(width * 0.14),
+        int(height * 0.64),
+        int(width * 0.72),
+        int(height * 0.24)
+    )
+
+    draw_wrapped_text(card_surface, description, desc_font, desc_rect, WHITE, (35, 25, 25))
 
 
 def draw_text_fit_center(surface, text, font, rect, color, outline_color):
@@ -266,7 +321,7 @@ def draw_wrapped_text(surface, text, font, rect, color, outline_color):
 
 
 def render_text_with_outline(text, font, color, outline_color, outline_size):
-    base_text = font.render(text, True, color)
+    base_text = font.render(str(text), True, color)
     outlined_text = pygame.Surface(
         (
             base_text.get_width() + outline_size * 2,
@@ -280,7 +335,7 @@ def render_text_with_outline(text, font, color, outline_color, outline_size):
             if offset_x == 0 and offset_y == 0:
                 continue
 
-            outline_text = font.render(text, True, outline_color)
+            outline_text = font.render(str(text), True, outline_color)
             outlined_text.blit(outline_text, (offset_x + outline_size, offset_y + outline_size))
 
     outlined_text.blit(base_text, (outline_size, outline_size))
@@ -289,7 +344,6 @@ def render_text_with_outline(text, font, color, outline_color, outline_size):
 
 
 def get_clicked_card_index(hand, mouse_pos):
-    # Return the hand slot index so main.py can remove/discard the exact card.
     for index, card in enumerate(hand):
         x = HAND_X + index * (CARD_WIDTH + CARD_GAP)
         card_rect = pygame.Rect(x, HAND_Y, CARD_WIDTH, CARD_HEIGHT)
@@ -309,7 +363,6 @@ def draw_card_hand(
     small_font=None,
     reaction_card_indices=None
 ):
-    # Draw the current hand and track one hovered card for a larger preview.
     if small_font is None:
         small_font = pygame.font.Font(None, 28)
 
@@ -328,7 +381,6 @@ def draw_card_hand(
             draw_sleeve_outline(screen, card_rect)
 
         if index == selected_card_index:
-            # Blue border marks the card that will be played if Play Card is clicked.
             pygame.draw.rect(screen, BLUE, card_rect, 4)
 
         if index in reaction_card_indices:
@@ -339,7 +391,6 @@ def draw_card_hand(
         if card_rect.collidepoint(mouse_pos):
             hovered_card = card
 
-    # Draw a larger readable preview when hovering over a card.
     if hovered_card is not None:
         preview_size = (360, 504)
         preview_x = 420

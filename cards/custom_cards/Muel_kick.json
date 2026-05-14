@@ -5,7 +5,7 @@
     "thickness": 0.5,
     "type": "attack",
     "rarity": "uncommon",
-    "image_path": "assets/card_templtes/card art/\"mule_kick.jpg\"",
+    "image_path": "assets/card_templtes/card art/muel_kick.jpg",
     "damage": 6,
     "block": 0,
     "draw": 0,
