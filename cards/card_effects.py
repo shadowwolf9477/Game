@@ -270,6 +270,58 @@ def start_shove_card(card, selected_character, enemies):
     }
 
 
+def play_mule_kick(card, selected_character, enemies):
+    target = get_enemy_behind(selected_character, enemies)
+
+    if target is None:
+        return None
+
+    hits = []
+    damage = get_custom_card_value(card, selected_character, "damage", card.get("damage", 0))
+    shove_distance = get_custom_card_value(
+        card,
+        selected_character,
+        "shove_distance",
+        card.get("shove_distance", 2)
+    )
+
+    damage_enemy(target, damage, hits)
+
+    if target["hp"] <= 0:
+        return {
+            "hits": hits
+        }
+
+    return {
+        "hits": hits,
+        "shove_target": target,
+        "push_range": shove_distance
+    }
+
+
+def play_reckless_charge(card, selected_character, enemies):
+    hits = []
+    damage = get_custom_card_value(card, selected_character, "damage", card.get("damage", 0))
+    move_distance = get_custom_card_value(
+        card,
+        selected_character,
+        "move_distance",
+        card.get("move_distance", 2)
+    )
+    target_tiles = get_forward_row_tiles(selected_character, move_distance)
+
+    for enemy in enemies:
+        if (enemy["row"], enemy["col"]) in target_tiles:
+            damage_enemy(enemy, damage, hits)
+
+    return {
+        "hits": hits,
+        "forced_charge": {
+            "distance": move_distance
+        }
+    }
+
+
 def place_trap_card(card, selected_character, enemies):
     return {
         "trap": {
@@ -293,6 +345,35 @@ def get_enemy_directly_ahead(selected_character, enemies):
             return enemy
 
     return None
+
+
+def get_enemy_behind(selected_character, enemies):
+    target_col = selected_character["col"] - 1
+
+    if get_character_attack_direction(selected_character) == "back":
+        target_col = selected_character["col"] + 1
+
+    for enemy in enemies:
+        if enemy["row"] == selected_character["row"] and enemy["col"] == target_col:
+            return enemy
+
+    return None
+
+
+def get_forward_row_tiles(selected_character, distance):
+    tiles = []
+    attack_direction = get_character_attack_direction(selected_character)
+
+    for step in range(1, distance + 1):
+        if attack_direction == "back":
+            col = selected_character["col"] - step
+        else:
+            col = selected_character["col"] + step
+
+        if 0 <= col < GRID_COLS:
+            tiles.append((selected_character["row"], col))
+
+    return tiles
 
 
 def get_custom_card_value(card, selected_character, value_name, default=0):
@@ -556,6 +637,8 @@ CARD_EFFECTS = {
     "move": start_move_card,
     "deep_breath": play_deep_breath,
     "shove": start_shove_card,
+    "mule_kick": play_mule_kick,
+    "reckless_charge": play_reckless_charge,
     "trap": place_trap_card,
     "custom_card": run_custom_card_effect
 }
@@ -579,10 +662,7 @@ def play_card(card, selected_character, enemies, current_energy):
     effect_function = CARD_EFFECTS[effect_name]
     result = effect_function(card, selected_character, enemies)
 
-    if effect_name == "shove" and result is None:
-        return False, current_energy + card["cost"], None
-
-    if effect_name == "custom_card" and result is None:
+    if result is None:
         return False, current_energy + card["cost"], None
 
     return True, current_energy, result
@@ -597,6 +677,9 @@ def play_reaction_card(card, selected_character, enemies, current_energy):
         return False, current_energy, None
 
     if card["type"] != "attack":
+        return False, current_energy, None
+
+    if not card.get("can_react", True):
         return False, current_energy, None
 
     reaction_cost = get_reaction_cost(card)

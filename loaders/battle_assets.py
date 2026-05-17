@@ -145,3 +145,14 @@ def load_battle_assets():
     }
 
     return battle_background, enemy_assets
+
+
+def apply_enemy_assets(enemies, enemy_assets):
+    for enemy in enemies:
+        assets = enemy_assets[enemy["type"]]
+        enemy["idle_frames"] = assets["idle_frames"]
+        enemy["attack_frames"] = assets["attack_frames"]
+        enemy["idle_frames_flipped"] = assets["idle_frames_flipped"]
+        enemy["attack_frames_flipped"] = assets["attack_frames_flipped"]
+        enemy["death_frames"] = assets["death_frames"]
+        enemy["death_frames_flipped"] = assets["death_frames_flipped"]

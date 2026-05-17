@@ -1,4 +1,6 @@
 import pygame
+
+from button import Button
 from settings import (
     WHITE,
     GAME_OVER_POPUP_X,
@@ -8,6 +10,13 @@ from settings import (
     GAME_OVER_TEXT_X,
     GAME_OVER_TEXT_Y
 )
+
+
+def create_game_over_buttons():
+    return {
+        "play_again": Button(410, 390, 220, 70, "Play Again"),
+        "quit": Button(650, 390, 160, 70, "Quit")
+    }
 
 
 def draw_game_over_menu(screen, font, play_again_button, quit_button):

@@ -97,6 +97,16 @@ def build_card_description(card, character):
     if card["effect"] == "shove":
         return "Push the first enemy in your row " + str(card.get("push_range", 2)) + " tiles."
 
+    if card["effect"] == "mule_kick":
+        damage = get_dynamic_card_value(card, character, "damage", card.get("damage", 0))
+        shove_distance = get_dynamic_card_value(card, character, "shove_distance", card.get("shove_distance", 2))
+        return "Kick behind you for " + str(damage) + " damage. Shove " + str(shove_distance) + "."
+
+    if card["effect"] == "reckless_charge":
+        damage = get_dynamic_card_value(card, character, "damage", card.get("damage", 0))
+        move_distance = get_dynamic_card_value(card, character, "move_distance", card.get("move_distance", 2))
+        return "Charge forward " + str(move_distance) + ". Deal " + str(damage) + " damage along the charge."
+
     if card["effect"] == "trap":
         return "Set a radius " + str(card.get("trap_radius", 1)) + " trap for " + str(card.get("trap_duration", 4)) + " turns."
 

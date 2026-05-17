@@ -4,6 +4,8 @@ from battle_setup import (
     move_orc_like_knight,
     prepare_enemy_attacks,
     get_enemy_random_movement_steps,
+    get_goblin_movement_steps,
+    get_support_enemy_movement_steps,
     get_orc_knight_movement_steps,
     get_skeleton_movement_steps,
     get_crawler_movement_steps,
@@ -28,6 +30,26 @@ def finish_enemy_attack(party, player_grid_data, enemy_grid_data, enemies):
         if enemy["type"] == "orc":
             if enemy_attacked:
                 move_orc_like_knight(enemy, enemy_grid_data)
+        elif enemy["type"] == "goblin":
+            movement_steps = get_goblin_movement_steps(enemy, enemy_grid_data, party)
+
+            if movement_steps:
+                move_enemy_step(enemy, enemy_grid_data, movement_steps[0])
+        elif enemy["type"] == "skeleton":
+            movement_steps = get_skeleton_movement_steps(enemy, enemy_grid_data, party)
+
+            if movement_steps:
+                move_enemy_step(enemy, enemy_grid_data, movement_steps[0])
+        elif enemy["type"] == "crawler":
+            movement_steps = get_crawler_movement_steps(enemy, enemy_grid_data, party)
+
+            if movement_steps:
+                move_enemy_step(enemy, enemy_grid_data, movement_steps[0])
+        elif enemy["type"] in ["bone_caller", "web_priest"]:
+            movement_steps = get_support_enemy_movement_steps(enemy, enemy_grid_data, party)
+
+            if movement_steps:
+                move_enemy_step(enemy, enemy_grid_data, movement_steps[0])
         else:
             move_enemy_random(enemy, enemy_grid_data)
 
@@ -57,11 +79,15 @@ def build_enemy_movement_queue(enemies, enemy_grid_data, party):
 
         if enemy["type"] == "orc":
             if enemy_attacked:
-                movement_queue.extend(get_orc_knight_movement_steps(enemy, enemy_grid_data))
+                movement_queue.extend(get_orc_knight_movement_steps(enemy, enemy_grid_data, party))
+        elif enemy["type"] == "goblin":
+            movement_queue.extend(get_goblin_movement_steps(enemy, enemy_grid_data, party))
         elif enemy["type"] == "skeleton":
-            movement_queue.extend(get_skeleton_movement_steps(enemy, enemy_grid_data))
+            movement_queue.extend(get_skeleton_movement_steps(enemy, enemy_grid_data, party))
         elif enemy["type"] == "crawler":
             movement_queue.extend(get_crawler_movement_steps(enemy, enemy_grid_data, party))
+        elif enemy["type"] in ["bone_caller", "web_priest"]:
+            movement_queue.extend(get_support_enemy_movement_steps(enemy, enemy_grid_data, party))
         else:
             movement_queue.extend(get_enemy_random_movement_steps(enemy, enemy_grid_data))
 
@@ -83,3 +109,14 @@ def get_next_attacking_enemy_index(enemies, current_index):
             return index
 
     return None
+
+
+def move_enemy_step(enemy, enemy_grid_data, movement_step):
+    from movement import move_unit
+
+    move_unit(
+        enemy,
+        enemy_grid_data,
+        movement_step["row_change"],
+        movement_step["col_change"]
+    )

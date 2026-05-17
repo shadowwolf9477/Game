@@ -1,5 +1,6 @@
 import pygame
 
+from button import Button
 from loaders.asset_paths import asset_path
 from settings import (
     WHITE,
@@ -54,6 +55,14 @@ STATUS_DEFINITIONS = [
         "remaining_label": "Attacks left"
     }
 ]
+
+
+def create_battle_buttons():
+    return {
+        "end_turn": Button(870, 60, 220, 70, "End turn"),
+        "play_card": Button(870, 140, 220, 70, "Play Card"),
+        "team_special": Button(215, 144, 180, 44, "Team")
+    }
 
 
 def render_outlined_text(font, text, text_color, outline_color=(0, 0, 0)):
@@ -209,11 +218,46 @@ def draw_status_tooltip(screen, font, hovered_status):
         screen.blit(rendered_line, (tooltip_rect.x + padding, tooltip_rect.y + padding + index * font.get_height()))
 
 
+def draw_team_special_meter(screen, team_special_button, team_special_charge, team_special_max_charge):
+    rect = team_special_button.rect
+    ready = team_special_charge >= team_special_max_charge
+    fill_ratio = 0
+
+    if team_special_max_charge > 0:
+        fill_ratio = team_special_charge / team_special_max_charge
+        fill_ratio = max(0, min(fill_ratio, 1))
+
+    background_color = (28, 22, 35)
+    border_color = (245, 229, 155) if ready else (170, 150, 105)
+    fill_color = (235, 194, 74) if ready else (100, 168, 225)
+    text_color = (255, 245, 210)
+    small_font = pygame.font.Font(None, 24)
+
+    pygame.draw.rect(screen, background_color, rect)
+    pygame.draw.rect(screen, border_color, rect, 2)
+
+    fill_width = int((rect.width - 8) * fill_ratio)
+    fill_rect = pygame.Rect(rect.x + 4, rect.y + rect.height - 13, fill_width, 8)
+    pygame.draw.rect(screen, fill_color, fill_rect)
+
+    label = "Team " + str(team_special_charge) + "/" + str(team_special_max_charge)
+
+    if ready:
+        label = "Team Ready"
+
+    label_image = small_font.render(label, True, text_color)
+    label_rect = label_image.get_rect(center=(rect.centerx, rect.y + 18))
+    screen.blit(label_image, label_rect)
+
+
 def draw_battle(
     screen,
     font,
     end_turn_button,
     play_card_button,
+    team_special_button,
+    team_special_charge,
+    team_special_max_charge,
     party,
     selected_character,
     current_energy,
@@ -238,6 +282,12 @@ def draw_battle(
 
     end_turn_button.draw(screen, font)
     play_card_button.draw(screen, font)
+    draw_team_special_meter(
+        screen,
+        team_special_button,
+        team_special_charge,
+        team_special_max_charge
+    )
 
     for index, character in enumerate(party):
         hp_text = render_outlined_text(
@@ -515,10 +565,10 @@ def get_enemy_pattern_text(enemy):
     enemy_type = enemy["type"]
 
     if enemy_type == "orc":
-        return "Attacks a 2x2 smash."
+        return "Smashes the best 2x2 around players."
 
     if enemy_type == "bone_caller":
-        return "Hits one full row."
+        return "Hits the most crowded row."
 
     if enemy_type == "skeleton":
         attack_range = enemy.get("attack_range", 1)
@@ -529,27 +579,30 @@ def get_enemy_pattern_text(enemy):
         return "Hits row range " + str(attack_range) + "."
 
     if enemy_type == "crawler":
-        return "Hits its matching tile."
+        return "Targets the closest character."
 
     if enemy_type == "web_priest":
-        return "Attacks X or plus pattern."
+        return "Hexes around an exposed character."
 
-    return "Attacks 2 random tiles."
+    return "Targets weak characters and escape tiles."
 
 
 def get_enemy_move_text(enemy):
     enemy_type = enemy["type"]
 
     if enemy_type == "orc":
-        return "After attacking, knight jump."
+        return "After attacking, jumps toward characters."
 
     if enemy_type == "crawler":
         return "Moves toward living characters."
 
     if enemy_type == "skeleton":
-        return "Moves up to 2 squares."
+        return "Moves up to 2 squares toward characters."
 
-    return "Moves randomly."
+    if enemy_type in ["bone_caller", "web_priest"]:
+        return "Keeps away from living characters."
+
+    return "Moves toward living characters."
 
 
 def get_enemy_applied_status_text(enemy):
@@ -562,7 +615,7 @@ def get_enemy_applied_status_text(enemy):
         return "Reaction lock, discard, weak attacks."
 
     if enemy_type == "bone_caller":
-        return "Heals allies. Gains dmg when allies die."
+        return "Heals allies. Gains dmg when enemies spawn."
 
     return ""
 
@@ -570,8 +623,8 @@ def get_enemy_applied_status_text(enemy):
 def get_enemy_active_status_text(enemy):
     statuses = []
 
-    if enemy.get("ally_death_bonus", 0) > 0:
-        statuses.append("+" + str(enemy["ally_death_bonus"]) + " attack")
+    if enemy.get("spawn_bonus", 0) > 0:
+        statuses.append("+" + str(enemy["spawn_bonus"]) + " attack")
 
     if enemy.get("can_split", False) and enemy["hp"] <= enemy.get("split_threshold", 0):
         statuses.append("will split")

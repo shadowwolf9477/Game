@@ -3,7 +3,8 @@ import random
 import subprocess
 import sys
 
-from button import Button
+from state.character_select_state import make_character_select_state
+from state.battle_animation_runtime import make_battle_animation_runtime
 from settings import (
     SCREEN_WIDTH,
     SCREEN_HEIGHT,
@@ -71,6 +72,17 @@ from screens.pile_screen import (
     get_pile_view_close_clicked,
     get_pile_max_scroll
 )
+from screens.battle_popups import (
+    draw_discard_choice_overlay,
+    draw_discard_animation,
+    draw_swing_choice_popup,
+    get_clicked_swing_direction
+)
+from screens.character_select_screen import (
+    create_character_select_buttons,
+    draw_character_select_screen,
+    add_character_to_selection
+)
 from party_manager import (
     make_party,
     place_party_on_grid,
@@ -85,13 +97,20 @@ from party_manager import (
     tick_party_statuses,
     tick_enemy_turn_statuses
 )
-
+from loaders.character_select_assets import load_character_select_assets
 from battle_grid import create_grid_data
-from loaders.battle_assets import load_battle_assets
+from loaders.battle_assets import load_battle_assets, apply_enemy_assets
 from loaders.sound_assets import load_battle_sounds, play_character_attack_sound
 from movement import move_unit, can_land_on_tile
-from menus.game_over_menu import draw_game_over_menu
-from battle_renderer import draw_battle, draw_reaction_warning_edges, draw_enemy_hover_tooltip, get_clicked_enemy
+from menus.home_menu import create_home_menu_buttons, draw_home_menu
+from menus.game_over_menu import create_game_over_buttons, draw_game_over_menu
+from battle_renderer import (
+    create_battle_buttons,
+    draw_battle,
+    draw_reaction_warning_edges,
+    draw_enemy_hover_tooltip,
+    get_clicked_enemy
+)
 from state.animation_state import update_animation_frame
 from damage_numbers import make_damage_popup, update_damage_popups, draw_damage_popups
 from battle_animations import (
@@ -111,8 +130,16 @@ from battle_turn_logic import (
     finish_enemy_turn,
     get_next_attacking_enemy_index
 )
+from team_specials import (
+    TEAM_SPECIAL_MAX_CHARGE,
+    add_team_special_charge,
+    get_charge_from_hits,
+    get_crossfire_tiles,
+    play_crossfire_cleave,
+    team_special_is_ready
+)
 
-from cards.card_renderer import draw_card_hand, get_clicked_card_index, get_composed_card_image
+from cards.card_renderer import draw_card_hand, get_clicked_card_index
 from cards.card_effects import play_card, play_reaction_card, get_reaction_cost
 from cards.card_targeting import get_card_preview_tiles
 from cards.player_deck import build_starting_deck, shuffle_deck, draw_cards
@@ -129,27 +156,32 @@ pygame.display.set_caption("Roguelike Game")
 font = pygame.font.Font(None, 50)
 # Smaller text keeps reward-card labels inside their temporary boxes.
 small_font = pygame.font.Font(None, 34)
+parchment_font = pygame.font.Font(None, 26)
 battle_sounds = load_battle_sounds()
 
 dev_buttons = []
 selected_dev_card_index = 0
 selected_battle_index = 0
 
-# Shared menu and battle buttons.
-# These are created once and reused while the game changes screen states.
-start_button = Button(500, 220, 220, 70, "Start")
+# Screen buttons are created by the module that owns their layout.
+home_menu_buttons = create_home_menu_buttons()
+start_button = home_menu_buttons["start"]
+card_editor_button = home_menu_buttons["card_editor"]
+quit_button = home_menu_buttons["quit"]
 
-card_editor_button = Button(500, 310, 220, 70, "Card Editor")
+character_select_buttons = create_character_select_buttons()
+archer_button = character_select_buttons["archer"]
+warrior_button = character_select_buttons["warrior"]
+character_start_button = character_select_buttons["start_game"]
 
-quit_button = Button(500, 400, 220, 70, "Quit")
+battle_buttons = create_battle_buttons()
+end_turn_button = battle_buttons["end_turn"]
+play_card_button = battle_buttons["play_card"]
+team_special_button = battle_buttons["team_special"]
 
-archer_button = Button(450, 330, 330, 70, "Archer + Warrior")
-
-end_turn_button = Button(870, 60, 220, 70, "End turn")
-play_card_button = Button(870, 140, 220, 70, "Play Card")
-
-play_again_button = Button(410, 390, 220, 70, "Play Again")
-game_over_quit_button = Button(650, 390, 160, 70, "Quit")
+game_over_buttons = create_game_over_buttons()
+play_again_button = game_over_buttons["play_again"]
+game_over_quit_button = game_over_buttons["quit"]
 
 
 # Player and battle state.
@@ -201,8 +233,8 @@ selected_sleeve = None
 card_reward_choices = []
 
 
-
-
+# Character select state will grow when the screen becomes a real party picker.
+character_select_state = make_character_select_state()
 
 # Movement card planning state.
 # Movement cards enter a preview mode first so the player can choose a path
@@ -232,6 +264,8 @@ enemy_movement_speed = 20
 reaction_mode = False
 reaction_enemy = None
 reaction_options = []
+team_special_charge = 0
+team_special_aim_mode = False
 damage_popups = []
 enemy_death_animations = []
 projectile_animations = []
@@ -252,18 +286,7 @@ swing_choice_character = None
 # Battle assets.
 # These frame lists are reused every frame instead of reloading images.
 battle_background, enemy_assets = load_battle_assets()
-
-
-def apply_enemy_assets(enemies, enemy_assets):
-    for enemy in enemies:
-        assets = enemy_assets[enemy["type"]]
-        enemy["idle_frames"] = assets["idle_frames"]
-        enemy["attack_frames"] = assets["attack_frames"]
-        enemy["idle_frames_flipped"] = assets["idle_frames_flipped"]
-        enemy["attack_frames_flipped"] = assets["attack_frames_flipped"]
-        enemy["death_frames"] = assets["death_frames"]
-        enemy["death_frames_flipped"] = assets["death_frames_flipped"]
-
+character_select_assets = load_character_select_assets()
 
 def get_reaction_protected_characters(party):
     protected_characters = []
@@ -313,6 +336,9 @@ def get_reaction_options(player_hand, party, moving_enemy, current_energy):
         if card["type"] != "attack":
             continue
 
+        if not card.get("can_react", True):
+            continue
+
         reaction_character = get_reaction_character_for_card(card, party, moving_enemy, current_energy)
 
         if reaction_character is not None:
@@ -347,6 +373,7 @@ def add_damage_popups_from_hits(hits, board_name):
 
 def handle_card_feedback(card_result, acting_character):
     global player_attack_animation
+    global team_special_charge
 
     if not isinstance(card_result, dict):
         return
@@ -356,6 +383,11 @@ def handle_card_feedback(card_result, acting_character):
 
     if not hits:
         return
+
+    team_special_charge = add_team_special_charge(
+        team_special_charge,
+        get_charge_from_hits(hits)
+    )
 
     arrow_projectile = make_arrow_projectile(acting_character, hits, enemy_assets["arrow"])
 
@@ -472,40 +504,6 @@ def update_discard_animation():
     ) * eased_progress
 
 
-def draw_discard_choice_overlay(screen, font, small_font):
-    overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-    overlay.fill((0, 0, 0, 165))
-    screen.blit(overlay, (0, 0))
-
-    prompt_rect = pygame.Rect(340, 500, 520, 58)
-    pygame.draw.rect(screen, (28, 24, 34), prompt_rect)
-    pygame.draw.rect(screen, WHITE, prompt_rect, 2)
-
-    prompt_text = discard_choice_prompt
-    if pending_chosen_discards > 1:
-        prompt_text += " (" + str(pending_chosen_discards) + " left)"
-
-    title = font.render(prompt_text, True, WHITE)
-    title_rect = title.get_rect(center=prompt_rect.center)
-    screen.blit(title, title_rect)
-
-    hint_text = small_font.render("Click a card in your hand to discard it", True, WHITE)
-    hint_rect = hint_text.get_rect(center=(SCREEN_WIDTH // 2, 552))
-    screen.blit(hint_text, hint_rect)
-
-
-def draw_discard_animation(screen, selected_character):
-    if discard_animation is None:
-        return
-
-    card_image = get_composed_card_image(
-        discard_animation["card"],
-        selected_character,
-        (CARD_WIDTH, CARD_HEIGHT)
-    )
-    screen.blit(card_image, (int(discard_animation["x"]), int(discard_animation["y"])))
-
-
 def card_needs_swing_choice(card, character):
     if card is None or character is None:
         return False
@@ -538,6 +536,52 @@ def can_afford_card(card):
         return False
 
     return current_energy >= card["cost"]
+
+
+def get_character_card_value(card, character, value_name, default=0):
+    character_values = card.get("character_values", {})
+
+    if character is not None:
+        character_name = character.get("name")
+
+        if character_name in character_values:
+            if value_name in character_values[character_name]:
+                return character_values[character_name][value_name]
+
+    return card.get(value_name, default)
+
+
+def card_uses_movement_preview(card):
+    if card is None:
+        return False
+
+    if card["effect"] == "move":
+        return True
+
+    if card["effect"] != "custom_card":
+        return False
+
+    for effect in card.get("effects", []):
+        if effect.get("type") in ["move_character", "charge_character"]:
+            return True
+
+    return False
+
+
+def get_card_movement_range(card, character):
+    if card["effect"] == "move":
+        return card.get("move_range", 0)
+
+    for effect in card.get("effects", []):
+        effect_type = effect.get("type")
+
+        if effect_type not in ["move_character", "charge_character"]:
+            continue
+
+        value_name = effect.get("distance_from", "move_distance")
+        return get_character_card_value(card, character, value_name, card.get("move_distance", 1))
+
+    return 0
 
 
 def get_keyboard_direction(key, allow_arrow_keys=False):
@@ -588,10 +632,15 @@ def start_movement_preview(card_index, character):
 
     selected_card = player_hand[card_index]
 
-    if selected_card["effect"] != "move":
+    if not card_uses_movement_preview(selected_card):
         return False
 
     if not character_can_use_card(character, selected_card) or not can_afford_card(selected_card):
+        return False
+
+    move_range = get_card_movement_range(selected_card, character)
+
+    if move_range <= 0:
         return False
 
     movement_mode = True
@@ -600,7 +649,7 @@ def start_movement_preview(card_index, character):
     movement_preview_row = character["row"]
     movement_preview_col = character["col"]
     movement_preview_path = []
-    movement_steps_left = selected_card["move_range"]
+    movement_steps_left = move_range
 
     return True
 
@@ -697,6 +746,16 @@ def get_movement_preview_tiles():
     return preview_tiles
 
 
+def get_team_special_preview_tiles():
+    mouse_tile = get_clicked_grid_tile(pygame.mouse.get_pos(), ENEMY_GRID_X)
+
+    if mouse_tile is None:
+        return []
+
+    center_row, center_col = mouse_tile
+    return get_crossfire_tiles(center_row, center_col)
+
+
 def confirm_movement_card():
     global current_energy
     global selected_card_index
@@ -724,13 +783,20 @@ def confirm_movement_card():
     if not card_was_played:
         return False
 
-    player_grid_data[movement_card_user["row"]][movement_card_user["col"]]["unit"] = None
-    movement_card_user["row"] = movement_preview_row
-    movement_card_user["col"] = movement_preview_col
-    player_grid_data[movement_card_user["row"]][movement_card_user["col"]]["unit"] = movement_card_user
-    gain_block(movement_card_user, selected_card.get("block", 0))
-    clear_shields_involving_character(party, movement_card_user)
-    remove_broken_shields(party)
+    acting_character = movement_card_user
+
+    handle_card_feedback(card_result, acting_character)
+    handle_enemy_deaths(enemies, enemy_grid_data)
+    clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
+
+    if can_land_on_tile(player_grid_data, movement_preview_row, movement_preview_col, acting_character):
+        player_grid_data[acting_character["row"]][acting_character["col"]]["unit"] = None
+        acting_character["row"] = movement_preview_row
+        acting_character["col"] = movement_preview_col
+        player_grid_data[acting_character["row"]][acting_character["col"]]["unit"] = acting_character
+        gain_block(acting_character, selected_card.get("block", 0))
+        clear_shields_involving_character(party, acting_character)
+        remove_broken_shields(party)
 
     played_card = player_hand.pop(selected_card_index)
     discard_pile.append(played_card)
@@ -739,6 +805,13 @@ def confirm_movement_card():
     movement_card = None
     movement_card_user = None
     movement_preview_path = []
+    apply_card_utility_result(card_result)
+
+    if start_shove_mode(card_result, acting_character):
+        return True
+
+    if len(enemies) == 0:
+        queue_reward_after_battle()
 
     return True
 
@@ -753,7 +826,7 @@ def confirm_selected_card():
     if not character_can_use_card(selected_character, selected_card):
         return False
 
-    if selected_card["effect"] == "move":
+    if card_uses_movement_preview(selected_card):
         return start_movement_preview(selected_card_index, selected_character)
 
     if card_needs_swing_choice(selected_card, selected_character) and can_afford_card(selected_card):
@@ -783,47 +856,6 @@ def clear_swing_choice():
     swing_choice_mode = False
     swing_choice_card_index = None
     swing_choice_character = None
-
-
-def get_swing_choice_rects():
-    return {
-        "left": pygame.Rect(500, 370, 80, 70),
-        "right": pygame.Rect(620, 370, 80, 70)
-    }
-
-
-def get_clicked_swing_direction(mouse_pos):
-    swing_rects = get_swing_choice_rects()
-
-    for direction, rect in swing_rects.items():
-        if rect.collidepoint(mouse_pos):
-            return direction
-
-    return None
-
-
-def draw_swing_choice_popup(screen, font, small_font):
-    popup_rect = pygame.Rect(440, 310, 320, 160)
-    pygame.draw.rect(screen, (28, 24, 34), popup_rect)
-    pygame.draw.rect(screen, WHITE, popup_rect, 3)
-
-    title = small_font.render("Swing direction", True, WHITE)
-    title_rect = title.get_rect(center=(popup_rect.centerx, popup_rect.y + 32))
-    screen.blit(title, title_rect)
-
-    swing_rects = get_swing_choice_rects()
-
-    for direction, rect in swing_rects.items():
-        pygame.draw.rect(screen, (45, 45, 60), rect)
-        pygame.draw.rect(screen, WHITE, rect, 2)
-
-        label = "L"
-        if direction == "right":
-            label = "R"
-
-        label_text = font.render(label, True, WHITE)
-        label_rect = label_text.get_rect(center=rect.center)
-        screen.blit(label_text, label_rect)
 
 
 def play_selected_non_movement_card(card_index, acting_character, swing_direction=None):
@@ -858,6 +890,7 @@ def play_selected_non_movement_card(card_index, acting_character, swing_directio
     handle_card_feedback(card_result, acting_character)
     handle_enemy_deaths(enemies, enemy_grid_data)
     clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
+    apply_forced_charge_result(card_result, acting_character)
     played_card = player_hand.pop(card_index)
     discard_pile.append(played_card)
     selected_card_index = None
@@ -928,6 +961,32 @@ def apply_card_utility_result(card_result):
     if "traps" in card_result:
         for trap in card_result["traps"]:
             place_trap_on_enemy_grid(trap, enemy_grid_data)
+
+
+def apply_forced_charge_result(card_result, character):
+    if not isinstance(card_result, dict) or "forced_charge" not in card_result:
+        return False
+
+    forced_charge = card_result["forced_charge"]
+    distance = forced_charge.get("distance", 0)
+    row_change = 0
+    col_change = 1
+    moved = False
+
+    if character.get("flip_x", False):
+        col_change = -1
+
+    for step_index in range(distance):
+        if not move_unit(character, player_grid_data, row_change, col_change):
+            break
+
+        moved = True
+
+    if moved:
+        clear_shields_involving_character(party, character)
+        remove_broken_shields(party)
+
+    return moved
 
 
 def gain_block(character, amount):
@@ -1218,6 +1277,11 @@ def reset_battle_animation_state():
     global shove_target
     global shove_card_user
     global shove_steps_left
+    global shove_preview_path
+    global shove_preview_row
+    global shove_preview_col
+    global shove_animation_queue
+    global shove_animation_timer
     global selected_enemy_for_movement
     global enemy_movement_preview_tiles
     global discard_choice_mode
@@ -1237,6 +1301,11 @@ def reset_battle_animation_state():
     shove_target = None
     shove_card_user = None
     shove_steps_left = 0
+    shove_preview_path = []
+    shove_preview_row = 0
+    shove_preview_col = 0
+    shove_animation_queue = []
+    shove_animation_timer = 0
     selected_enemy_for_movement = None
     enemy_movement_preview_tiles = []
     discard_choice_mode = False
@@ -1247,6 +1316,99 @@ def reset_battle_animation_state():
     swing_choice_mode = False
     swing_choice_card_index = None
     swing_choice_character = None
+
+
+def reset_battle_input_state():
+    global selected_card_index
+    global movement_mode
+    global movement_card
+    global movement_card_user
+    global movement_preview_path
+    global enemy_movement_queue
+    global reaction_mode
+    global reaction_enemy
+    global reaction_options
+    global team_special_aim_mode
+
+    selected_card_index = None
+    movement_mode = False
+    movement_card = None
+    movement_card_user = None
+    movement_preview_path = []
+    enemy_movement_queue = []
+    reaction_mode = False
+    reaction_enemy = None
+    reaction_options = []
+    team_special_aim_mode = False
+
+
+def resolve_team_special(center_tile):
+    global team_special_charge
+    global team_special_aim_mode
+
+    if center_tile is None or not team_special_is_ready(team_special_charge):
+        return False
+
+    center_row, center_col = center_tile
+    card_result = play_crossfire_cleave(enemies, center_row, center_col)
+    hits = card_result.get("hits", [])
+
+    if hits:
+        add_damage_popups_from_hits(hits, "enemy")
+        queue_enemy_death_animations(enemies, enemy_death_animations)
+        handle_enemy_deaths(enemies, enemy_grid_data)
+        clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
+
+    team_special_charge = 0
+    team_special_aim_mode = False
+
+    if len(enemies) == 0:
+        queue_reward_after_battle()
+
+    return True
+
+
+def start_selected_party_tutorial_battle():
+    global party
+    global selected_character_index
+    global selected_character
+    global player_grid_data
+    global enemy_grid_data
+    global player_deck
+    global draw_pile
+    global player_hand
+    global discard_pile
+    global current_energy
+    global current_state
+    global battle_number
+    global team_special_charge
+
+    party = make_party()
+    selected_character_index = 0
+    selected_character = get_selected_character(party, selected_character_index)
+
+    player_grid_data = create_grid_data("player")
+    enemy_grid_data = create_grid_data("enemy")
+    enemies.clear()
+    place_party_on_grid(party, player_grid_data, True)
+
+    player_deck = build_starting_deck(party)
+    draw_pile = shuffle_deck(player_deck)
+    player_hand = []
+    discard_pile = []
+    draw_cards(draw_pile, discard_pile, player_hand, 5)
+
+    reset_battle_input_state()
+    reset_battle_animation_state()
+
+    current_energy = max_energy
+    current_state = BATTLE
+    battle_number = 1
+    team_special_charge = 0
+
+    start_tutorial_battle(enemies, enemy_grid_data)
+    apply_enemy_assets(enemies, enemy_assets)
+    prepare_enemy_attacks(enemies, player_grid_data)
 
 
 def discard_random_cards_for_status():
@@ -1266,19 +1428,18 @@ def discard_random_cards_for_status():
 
 # Animation state.
 # Timers count game frames; frame indexes choose which sprite image to draw.
-enemy_idle_frame_index = 0
-enemy_animation_timer = 0
-enemy_animation_speed = 16
-
-enemy_attack_frame_index = 0
-enemy_attack_timer = 0
-enemy_attack_speed = 6
-enemy_is_attacking = False
-attacking_enemy_index = None
-
-player_idle_frame_index = 0
-player_animation_timer = 0
-player_animation_speed = 16
+battle_animation_runtime = make_battle_animation_runtime()
+enemy_idle_frame_index = battle_animation_runtime["enemy_idle_frame_index"]
+enemy_animation_timer = battle_animation_runtime["enemy_animation_timer"]
+enemy_animation_speed = battle_animation_runtime["enemy_animation_speed"]
+enemy_attack_frame_index = battle_animation_runtime["enemy_attack_frame_index"]
+enemy_attack_timer = battle_animation_runtime["enemy_attack_timer"]
+enemy_attack_speed = battle_animation_runtime["enemy_attack_speed"]
+enemy_is_attacking = battle_animation_runtime["enemy_is_attacking"]
+attacking_enemy_index = battle_animation_runtime["attacking_enemy_index"]
+player_idle_frame_index = battle_animation_runtime["player_idle_frame_index"]
+player_animation_timer = battle_animation_runtime["player_animation_timer"]
+player_animation_speed = battle_animation_runtime["player_animation_speed"]
 
 
 current_state = HOME_MENU
@@ -1318,6 +1479,11 @@ while running:
         if event.type == pygame.KEYDOWN:    
             if event.key == pygame.K_7 and (event.mod & pygame.KMOD_ALT):
                 toggle_dev_menu()
+                continue
+
+            if dev_menu_is_open():
+                continue
+
             if current_state == BATTLE and reaction_mode:
                 if event.key == pygame.K_g:
                     reaction_mode = False
@@ -1408,8 +1574,15 @@ while running:
                         confirm_selected_card()
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+            if dev_menu_is_open():
+                continue
+
             if current_state == BATTLE and current_turn == PLAYER_TURN:
                 if discard_choice_mode or reaction_mode or pending_reward_after_deaths:
+                    continue
+
+                if team_special_aim_mode:
+                    team_special_aim_mode = False
                     continue
 
                 if shove_mode:
@@ -1425,409 +1598,396 @@ while running:
                     continue
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if dev_menu_is_open():
-                    for button in dev_buttons:
-                        if button.clicked(event.pos):
-                            action = button.action
+            if dev_menu_is_open():
+                for button in dev_buttons:
+                    if button.clicked(event.pos):
+                        action = button.action
 
-                            if action == "kill_first":
-                                instant_kill_first_enemy(enemies)
-                                handle_enemy_deaths(enemies, enemy_grid_data)
-
-                            elif action == "kill_all":
-                                instant_kill_all_enemies(enemies)
-                                handle_enemy_deaths(enemies, enemy_grid_data)
-
-                            elif action == "prev_card":
-                                selected_dev_card_index -= 1
-
-                            elif action == "next_card":
-                                selected_dev_card_index += 1
-
-                            elif action == "add_hand":
-                                custom_cards = get_custom_card_ids()
-                                if custom_cards:
-                                    card_id = custom_cards[selected_dev_card_index % len(custom_cards)]
-                                    add_card_to_hand(card_id, player_hand, CARD_LIBRARY)
-
-                            elif action == "add_deck":
-                                custom_cards = get_custom_card_ids()
-                                if custom_cards:
-                                    card_id = custom_cards[selected_dev_card_index % len(custom_cards)]
-                                    add_card_to_deck(card_id, player_deck, CARD_LIBRARY)
-
-                            elif action == "prev_battle":
-                                selected_battle_index -= 1
-
-                            elif action == "next_battle":
-                                selected_battle_index += 1
-
-                            elif action == "load_battle":
-                                print("Battle loading button pressed. Hook this to your JSON battle loader.")
-
-                    continue
-            if current_state == HOME_MENU:
-                # Home menu only chooses between leaving or character select.
-
-                if start_button.is_clicked(event.pos):
-                    current_state = CHARACTER_SELECT
-
-                if card_editor_button.is_clicked(event.pos):
-                    subprocess.Popen([sys.executable, "cards/custom_card_editor.py"])
-
-                if quit_button.is_clicked(event.pos):
-                    running = False
-
-            if current_state == CHARACTER_SELECT:
-                if archer_button.is_clicked(event.pos):
-                    # Character selection starts the fixed tutorial fight with two characters.
-                    party = make_party()
-                    selected_character_index = 0
-                    selected_character = get_selected_character(party, selected_character_index)
-
-                    player_grid_data = create_grid_data("player")
-                    enemy_grid_data = create_grid_data("enemy")
-                    place_party_on_grid(party, player_grid_data, True)
-
-                    player_deck = build_starting_deck(party)
-                    draw_pile = shuffle_deck(player_deck)
-                    player_hand = []
-                    discard_pile = []
-                    draw_cards(draw_pile, discard_pile, player_hand, 5)
-
-                    selected_card_index = None
-                    current_energy = max_energy
-                    movement_mode = False
-                    movement_card = None
-                    movement_preview_path = []
-                    enemy_movement_queue = []
-                    reaction_mode = False
-                    reaction_enemy = None
-                    reaction_options = []
-                    reset_battle_animation_state()
-
-                    current_state = BATTLE
-                    battle_number = 1
-
-                    start_tutorial_battle(enemies, enemy_grid_data)
-                    apply_enemy_assets(enemies, enemy_assets)
-                    prepare_enemy_attacks(enemies, player_grid_data)
-
-            if current_state == BATTLE:
-                # Battle clicks either select cards, confirm movement, play cards, or end turn.
-                if pending_reward_after_deaths:
-                    continue
-
-                if discard_choice_mode:
-                    clicked_card_index = get_clicked_card_index(player_hand, event.pos)
-                    choose_discard_card(clicked_card_index)
-                    continue
-
-                if swing_choice_mode:
-                    resolve_swing_choice(get_clicked_swing_direction(event.pos))
-                    continue
-
-                if shove_mode:
-                    if play_card_button.is_clicked(event.pos):
-                        confirm_shove()
-                        continue
-
-                    clicked_enemy_tile = get_clicked_grid_tile(event.pos, ENEMY_GRID_X)
-                    click_shove_preview_tile(clicked_enemy_tile)
-                    continue
-
-                if reaction_mode:
-                    clicked_card_index = get_clicked_card_index(player_hand, event.pos)
-                    reaction_option = get_reaction_option_for_card(reaction_options, clicked_card_index)
-
-                    if reaction_option is not None:
-                        selected_card = player_hand[clicked_card_index]
-                        reaction_character = reaction_option["character"]
-                        card_was_played, current_energy, card_result = play_reaction_card(
-                            selected_card,
-                            reaction_character,
-                            enemies,
-                            current_energy
-                        )
-
-                        if card_was_played:
-                            handle_card_feedback(card_result, reaction_character)
+                        if action == "kill_first":
+                            instant_kill_first_enemy(enemies)
                             handle_enemy_deaths(enemies, enemy_grid_data)
-                            clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
-                            played_card = player_hand.pop(clicked_card_index)
-                            discard_pile.append(played_card)
-                            selected_card_index = None
 
-                            if reaction_enemy not in enemies:
-                                enemy_movement_queue = [
-                                    movement_step for movement_step in enemy_movement_queue
-                                    if movement_step["enemy"] is not reaction_enemy
-                                ]
+                        elif action == "kill_all":
+                            instant_kill_all_enemies(enemies)
+                            handle_enemy_deaths(enemies, enemy_grid_data)
 
-                            reaction_mode = False
-                            reaction_enemy = None
-                            reaction_options = []
+                        elif action == "prev_card":
+                            selected_dev_card_index -= 1
 
-                            if len(enemies) == 0:
-                                queue_reward_after_battle()
+                        elif action == "next_card":
+                            selected_dev_card_index += 1
 
-                    continue
+                        elif action == "add_hand":
+                            custom_cards = get_custom_card_ids()
+                            if custom_cards:
+                                card_id = custom_cards[selected_dev_card_index % len(custom_cards)]
+                                add_card_to_hand(card_id, player_hand, CARD_LIBRARY)
 
-                if pile_view_title is not None:
-                    if get_pile_view_close_clicked(event.pos):
-                        pile_view_title = None
-                        pile_view_cards = []
-                        pile_scroll_y = 0
-                        target_pile_scroll_y = 0
+                        elif action == "add_deck":
+                            custom_cards = get_custom_card_ids()
+                            if custom_cards:
+                                card_id = custom_cards[selected_dev_card_index % len(custom_cards)]
+                                add_card_to_deck(card_id, player_deck, CARD_LIBRARY)
 
-                    continue
+                        elif action == "prev_battle":
+                            selected_battle_index -= 1
 
-                clicked_pile_button = get_clicked_pile_button(event.pos)
+                        elif action == "next_battle":
+                            selected_battle_index += 1
 
-                if clicked_pile_button == "draw":
-                    pile_view_title = "Deck"
-                    pile_view_cards = shuffle_deck(draw_pile)
-                    pile_scroll_y = 0
-                    target_pile_scroll_y = 0
-                    selected_card_index = None
-                    continue
+                        elif action == "load_battle":
+                            print("Battle loading button pressed. Hook this to your JSON battle loader.")
 
-                if clicked_pile_button == "discard":
-                    pile_view_title = "Discard"
-                    pile_view_cards = discard_pile.copy()
-                    pile_scroll_y = 0
-                    target_pile_scroll_y = 0
-                    selected_card_index = None
-                    continue
+                continue
 
-                selected_character = get_selected_character(party, selected_character_index)
-                shield_button_rect = get_shield_button_rect(party, selected_character)
-                clicked_enemy = get_clicked_enemy(enemies, event.pos)
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            continue
 
-                if movement_mode:
-                    if play_card_button.is_clicked(event.pos):
-                        confirm_movement_card()
-                        continue
+        if current_state == HOME_MENU:
+            # Home menu only chooses between leaving or character select.
 
-                    clicked_player_tile = get_clicked_grid_tile(event.pos, PLAYER_GRID_X)
-                    click_movement_preview_tile(clicked_player_tile)
-                    continue
+            if start_button.is_clicked(event.pos):
+                current_state = CHARACTER_SELECT
 
-                if clicked_enemy is not None:
-                    select_enemy_movement_preview(clicked_enemy)
-                    selected_card_index = None
-                    movement_mode = False
-                    movement_card = None
-                    movement_card_user = None
-                    movement_preview_path = []
-                    continue
-                elif event.pos[0] >= ENEMY_GRID_X and event.pos[1] >= GRID_Y:
-                    select_enemy_movement_preview(None)
+            if card_editor_button.is_clicked(event.pos):
+                subprocess.Popen([sys.executable, "cards/custom_card_editor.py"])
 
-                if (
-                    shield_button_rect is not None
-                    and shield_button_rect.collidepoint(event.pos)
-                    and current_turn == PLAYER_TURN
-                    and not movement_mode
-                ):
-                    shield_target = get_shield_target(party, selected_character)
-                    already_shielding = selected_character.get("shielding") is shield_target
-                    clear_party_shields(party)
+            if quit_button.is_clicked(event.pos):
+                running = False
 
-                    if not already_shielding:
-                        selected_character["shielding"] = shield_target
+        if current_state == CHARACTER_SELECT:
+            selected_party = character_select_state["selected_party"]
 
-                    selected_card_index = None
-                    continue
+            if archer_button.is_clicked(event.pos):
+                add_character_to_selection(selected_party, "Archer")
+                continue
 
+            if warrior_button.is_clicked(event.pos):
+                add_character_to_selection(selected_party, "Warrior")
+                continue
+
+            if len(selected_party) >= 2 and character_start_button.is_clicked(event.pos):
+                start_selected_party_tutorial_battle()
+                continue
+
+        if current_state == BATTLE:
+            # Battle clicks either select cards, confirm movement, play cards, or end turn.
+            if pending_reward_after_deaths:
+                continue
+
+            if team_special_aim_mode:
+                clicked_enemy_tile = get_clicked_grid_tile(event.pos, ENEMY_GRID_X)
+                resolve_team_special(clicked_enemy_tile)
+                continue
+
+            if discard_choice_mode:
                 clicked_card_index = get_clicked_card_index(player_hand, event.pos)
-                clicked_character_index = get_clicked_character_index(party, event.pos)
+                choose_discard_card(clicked_card_index)
+                continue
 
-                if clicked_character_index is not None and not movement_mode:
-                    if selected_card_index is not None and current_turn == PLAYER_TURN:
-                        selected_card = player_hand[selected_card_index]
+            if swing_choice_mode:
+                resolve_swing_choice(get_clicked_swing_direction(event.pos))
+                continue
 
-                        if not character_can_use_card(party[clicked_character_index], selected_card):
-                            selected_card_index = None
-                            movement_mode = False
-                            movement_card = None
-                            movement_card_user = None
-                            movement_preview_path = []
-                            clear_swing_choice()
+            if shove_mode:
+                if play_card_button.is_clicked(event.pos):
+                    confirm_shove()
+                    continue
 
-                    selected_character_index = clicked_character_index
-                    selected_character = get_selected_character(party, selected_character_index)
+                clicked_enemy_tile = get_clicked_grid_tile(event.pos, ENEMY_GRID_X)
+                click_shove_preview_tile(clicked_enemy_tile)
+                continue
 
-                    if selected_card_index is not None and current_turn == PLAYER_TURN:
-                        selected_card = player_hand[selected_card_index]
+            if reaction_mode:
+                clicked_card_index = get_clicked_card_index(player_hand, event.pos)
+                reaction_option = get_reaction_option_for_card(reaction_options, clicked_card_index)
 
-                        if selected_card["effect"] == "move" and current_energy >= selected_card["cost"]:
-                            # Movement preview starts after choosing who will move, but costs nothing yet.
-                            start_movement_preview(selected_card_index, selected_character)
+                if reaction_option is not None:
+                    selected_card = player_hand[clicked_card_index]
+                    reaction_character = reaction_option["character"]
+                    card_was_played, current_energy, card_result = play_reaction_card(
+                        selected_card,
+                        reaction_character,
+                        enemies,
+                        current_energy
+                    )
 
-                if clicked_card_index is not None and current_turn == PLAYER_TURN and not movement_mode:
-                    selected_card_index = clicked_card_index
+                    if card_was_played:
+                        handle_card_feedback(card_result, reaction_character)
+                        handle_enemy_deaths(enemies, enemy_grid_data)
+                        clear_dead_enemy_incoming_attacks(enemies, player_grid_data)
+                        played_card = player_hand.pop(clicked_card_index)
+                        discard_pile.append(played_card)
+                        selected_card_index = None
+
+                        if reaction_enemy not in enemies:
+                            enemy_movement_queue = [
+                                movement_step for movement_step in enemy_movement_queue
+                                if movement_step["enemy"] is not reaction_enemy
+                            ]
+
+                        reaction_mode = False
+                        reaction_enemy = None
+                        reaction_options = []
+
+                        if len(enemies) == 0:
+                            queue_reward_after_battle()
+
+                continue
+
+            if pile_view_title is not None:
+                if get_pile_view_close_clicked(event.pos):
+                    pile_view_title = None
+                    pile_view_cards = []
+                    pile_scroll_y = 0
+                    target_pile_scroll_y = 0
+
+                continue
+
+            clicked_pile_button = get_clicked_pile_button(event.pos)
+
+            if clicked_pile_button == "draw":
+                pile_view_title = "Deck"
+                pile_view_cards = shuffle_deck(draw_pile)
+                pile_scroll_y = 0
+                target_pile_scroll_y = 0
+                selected_card_index = None
+                continue
+
+            if clicked_pile_button == "discard":
+                pile_view_title = "Discard"
+                pile_view_cards = discard_pile.copy()
+                pile_scroll_y = 0
+                target_pile_scroll_y = 0
+                selected_card_index = None
+                continue
+
+            if (
+                team_special_button.is_clicked(event.pos)
+                and current_turn == PLAYER_TURN
+                and team_special_is_ready(team_special_charge)
+                and not movement_mode
+                and not shove_mode
+            ):
+                team_special_aim_mode = True
+                selected_card_index = None
+                select_enemy_movement_preview(None)
+                continue
+
+            selected_character = get_selected_character(party, selected_character_index)
+            shield_button_rect = get_shield_button_rect(party, selected_character)
+            clicked_enemy = get_clicked_enemy(enemies, event.pos)
+
+            if movement_mode:
+                if play_card_button.is_clicked(event.pos):
+                    confirm_movement_card()
+                    continue
+
+                clicked_player_tile = get_clicked_grid_tile(event.pos, PLAYER_GRID_X)
+                click_movement_preview_tile(clicked_player_tile)
+                continue
+
+            if clicked_enemy is not None:
+                select_enemy_movement_preview(clicked_enemy)
+                selected_card_index = None
+                movement_mode = False
+                movement_card = None
+                movement_card_user = None
+                movement_preview_path = []
+                continue
+            elif event.pos[0] >= ENEMY_GRID_X and event.pos[1] >= GRID_Y:
+                select_enemy_movement_preview(None)
+
+            if (
+                shield_button_rect is not None
+                and shield_button_rect.collidepoint(event.pos)
+                and current_turn == PLAYER_TURN
+                and not movement_mode
+            ):
+                shield_target = get_shield_target(party, selected_character)
+                already_shielding = selected_character.get("shielding") is shield_target
+                clear_party_shields(party)
+
+                if not already_shielding:
+                    selected_character["shielding"] = shield_target
+
+                selected_card_index = None
+                continue
+
+            clicked_card_index = get_clicked_card_index(player_hand, event.pos)
+            clicked_character_index = get_clicked_character_index(party, event.pos)
+
+            if clicked_character_index is not None and not movement_mode:
+                if selected_card_index is not None and current_turn == PLAYER_TURN:
                     selected_card = player_hand[selected_card_index]
 
-                    if not character_can_use_card(selected_character, selected_card):
-                        usable_character_index = get_first_usable_character_index(party, selected_card)
-
-                        if usable_character_index is None:
-                            selected_card_index = None
-                        else:
-                            selected_character_index = usable_character_index
-                            selected_character = get_selected_character(party, selected_character_index)
-
-                if (
-                    play_card_button.is_clicked(event.pos)
-                    and movement_mode
-                ):
-                    confirm_movement_card()
-
-                if play_card_button.is_clicked(event.pos) and selected_card_index is not None and current_turn == PLAYER_TURN and not movement_mode:
-                    confirm_selected_card()
-
-
-                if end_turn_button.is_clicked(event.pos) and current_turn == PLAYER_TURN and not movement_mode and not shove_mode:
-                    # Keep the hand through enemy movement so attack cards can react.
-                    tick_party_statuses(party)
-                    current_turn = ENEMY_TURN
-                    enemy_is_attacking = True
-                    attacking_enemy_index = get_next_attacking_enemy_index(enemies, -1)
-                    selected_card_index = None
-                    enemy_attack_frame_index = 0
-                    enemy_attack_timer = 0
-                    reaction_mode = False
-                    reaction_enemy = None
-                    reaction_options = []
-
-                    if attacking_enemy_index is None:
-                        enemy_is_attacking = False
-                        enemy_movement_queue = build_enemy_movement_queue(enemies, enemy_grid_data, party)
-                        enemy_movement_timer = 0
-            if current_state == MAP:
-                clicked_node = get_clicked_map_node(map_layers, event.pos)
-
-                if clicked_node is not None:
-                    complete_map_node(map_layers, clicked_node)
-                    current_map_layer = clicked_node["layer"]
-
-                    if clicked_node["type"] == "battle" or clicked_node["type"] == "boss":
-                        # Starting a map battle rebuilds grids and reshuffles the whole deck.
-                        player_grid_data = create_grid_data("player")
-                        enemy_grid_data = create_grid_data("enemy")
-                        enemies.clear()
-
-                        place_party_on_grid(party, player_grid_data)
-                        selected_character = get_selected_character(party, selected_character_index)
-
-                        battle_number += 1
-                        last_battle_room = start_map_battle(enemies, enemy_grid_data, last_battle_room)
-                        apply_enemy_assets(enemies, enemy_assets)
-                        prepare_enemy_attacks(enemies, player_grid_data)
-
+                    if not character_can_use_card(party[clicked_character_index], selected_card):
                         selected_card_index = None
                         movement_mode = False
                         movement_card = None
                         movement_card_user = None
                         movement_preview_path = []
-                        enemy_movement_queue = []
-                        reaction_mode = False
-                        reaction_enemy = None
-                        reaction_options = []
-                        reset_battle_animation_state()
-                        player_hand.clear()
-                        discard_pile.clear()
-                        draw_pile = shuffle_deck(player_deck)
-                        discard_pile.clear()
+                        clear_swing_choice()
 
-                        draw_cards(draw_pile, discard_pile, player_hand, 5)
+                selected_character_index = clicked_character_index
+                selected_character = get_selected_character(party, selected_character_index)
 
-                        current_turn = PLAYER_TURN
-                        current_energy = max_energy
-                        current_state = BATTLE
+                if selected_card_index is not None and current_turn == PLAYER_TURN:
+                    selected_card = player_hand[selected_card_index]
 
-                    if clicked_node["type"] == "rest":
-                        # Rest is a placeholder reward node: heal a little, then stay on map.
-                        for character in party:
-                            character["current_hp"] += 2
+                    if card_uses_movement_preview(selected_card) and current_energy >= selected_card["cost"]:
+                        # Movement preview starts after choosing who will move, but costs nothing yet.
+                        start_movement_preview(selected_card_index, selected_character)
 
-                            if character["current_hp"] > character["max_hp"]:
-                                character["current_hp"] = character["max_hp"]
+            if clicked_card_index is not None and current_turn == PLAYER_TURN and not movement_mode:
+                selected_card_index = clicked_card_index
+                selected_card = player_hand[selected_card_index]
 
-                    if clicked_node["type"] == "shop":
-                        print("Shop clicked")
+                if not character_can_use_card(selected_character, selected_card):
+                    usable_character_index = get_first_usable_character_index(party, selected_card)
 
-                    if clicked_node["type"] == "upgrade":
-                        print("Upgrade clicked")
+                    if usable_character_index is None:
+                        selected_card_index = None
+                    else:
+                        selected_character_index = usable_character_index
+                        selected_character = get_selected_character(party, selected_character_index)
 
-                    if clicked_node["type"] == "event":
-                        print("Event clicked")
-            if current_state == REWARD:
-                # Reward popup first chooses a reward type, then may ask for a deck card.
-                if reward_mode == "choose_reward":
-                    reward_choice = get_reward_choice_click(event.pos)
+            if (
+                play_card_button.is_clicked(event.pos)
+                and movement_mode
+            ):
+                confirm_movement_card()
 
-                    if reward_choice == "new_card":
-                        card_reward_choices = generate_card_rewards(party, 3)
-                        reward_mode = "choose_new_card"
+            if play_card_button.is_clicked(event.pos) and selected_card_index is not None and current_turn == PLAYER_TURN and not movement_mode:
+                confirm_selected_card()
 
 
-                    if reward_choice == "sleeve":
-                        # Premium Sleeve modifies one valid card already in the deck.
-                        selected_sleeve = CARD_SLEEVES["premium_sleeve"]
-                        reward_mode = "choose_sleeve_card"
-                        deck_scroll_y = 0
-                        target_deck_scroll_y = 0
+            if end_turn_button.is_clicked(event.pos) and current_turn == PLAYER_TURN and not movement_mode and not shove_mode:
+                # Keep the hand through enemy movement so attack cards can react.
+                tick_party_statuses(party)
+                current_turn = ENEMY_TURN
+                enemy_is_attacking = True
+                attacking_enemy_index = get_next_attacking_enemy_index(enemies, -1)
+                selected_card_index = None
+                enemy_attack_frame_index = 0
+                enemy_attack_timer = 0
+                reaction_mode = False
+                reaction_enemy = None
+                reaction_options = []
 
-                elif reward_mode == "choose_new_card":
-                    clicked_card = get_clicked_card_reward(card_reward_choices, event.pos)
+                if attacking_enemy_index is None:
+                    enemy_is_attacking = False
+                    enemy_movement_queue = build_enemy_movement_queue(enemies, enemy_grid_data, party)
+                    enemy_movement_timer = 0
+        if current_state == MAP:
+            clicked_node = get_clicked_map_node(map_layers, event.pos)
 
-                    if clicked_card is not None:
-                        player_deck.append(clicked_card.copy())
-                        card_reward_choices = []
-                        current_state = MAP
+            if clicked_node is not None:
+                complete_map_node(map_layers, clicked_node)
+                current_map_layer = clicked_node["layer"]
 
-                elif reward_mode == "choose_sleeve_card":
-                    clicked_card = get_clicked_reward_deck_card(player_deck, deck_scroll_y, event.pos)
-
-                    if clicked_card is not None and apply_sleeve(selected_sleeve, clicked_card):
-                        current_state = MAP
-
-
-
-
-
-            if current_state == GAME_OVER:
-                if play_again_button.is_clicked(event.pos):
-                    # Reset board state, then return to character select for a fresh run.
-                    party = []
-                    selected_character = None
-                    selected_character_index = 0
+                if clicked_node["type"] == "battle" or clicked_node["type"] == "boss":
+                    # Starting a map battle rebuilds grids and reshuffles the whole deck.
                     player_grid_data = create_grid_data("player")
                     enemy_grid_data = create_grid_data("enemy")
                     enemies.clear()
 
-                    selected_card_index = None
-                    movement_mode = False
-                    movement_card = None
-                    movement_card_user = None
-                    movement_preview_path = []
-                    enemy_movement_queue = []
-                    reaction_mode = False
-                    reaction_enemy = None
-                    reaction_options = []
-                    map_layers = []
+                    place_party_on_grid(party, player_grid_data)
+                    selected_character = get_selected_character(party, selected_character_index)
+
+                    battle_number += 1
+                    last_battle_room = start_map_battle(enemies, enemy_grid_data, last_battle_room)
+                    apply_enemy_assets(enemies, enemy_assets)
+                    prepare_enemy_attacks(enemies, player_grid_data)
+
+                    reset_battle_input_state()
                     reset_battle_animation_state()
+                    player_hand.clear()
+                    discard_pile.clear()
+                    draw_pile = shuffle_deck(player_deck)
+                    discard_pile.clear()
+
+                    draw_cards(draw_pile, discard_pile, player_hand, 5)
 
                     current_turn = PLAYER_TURN
-                    current_state = CHARACTER_SELECT
-                    battle_number = 0
-                    last_battle_room = None
+                    current_energy = max_energy
+                    current_state = BATTLE
 
-                if game_over_quit_button.is_clicked(event.pos):
-                    running = False
+                if clicked_node["type"] == "rest":
+                    # Rest is a placeholder reward node: heal a little, then stay on map.
+                    for character in party:
+                        character["current_hp"] += 2
+
+                        if character["current_hp"] > character["max_hp"]:
+                            character["current_hp"] = character["max_hp"]
+
+                if clicked_node["type"] == "shop":
+                    print("Shop clicked")
+
+                if clicked_node["type"] == "upgrade":
+                    print("Upgrade clicked")
+
+                if clicked_node["type"] == "event":
+                    print("Event clicked")
+        if current_state == REWARD:
+            # Reward popup first chooses a reward type, then may ask for a deck card.
+            if reward_mode == "choose_reward":
+                reward_choice = get_reward_choice_click(event.pos)
+
+                if reward_choice == "new_card":
+                    card_reward_choices = generate_card_rewards(party, 3)
+                    reward_mode = "choose_new_card"
+
+
+                if reward_choice == "sleeve":
+                    # Premium Sleeve modifies one valid card already in the deck.
+                    selected_sleeve = CARD_SLEEVES["premium_sleeve"]
+                    reward_mode = "choose_sleeve_card"
+                    deck_scroll_y = 0
+                    target_deck_scroll_y = 0
+
+            elif reward_mode == "choose_new_card":
+                clicked_card = get_clicked_card_reward(card_reward_choices, event.pos)
+
+                if clicked_card is not None:
+                    player_deck.append(clicked_card.copy())
+                    card_reward_choices = []
+                    current_state = MAP
+
+            elif reward_mode == "choose_sleeve_card":
+                clicked_card = get_clicked_reward_deck_card(player_deck, deck_scroll_y, event.pos)
+
+                if clicked_card is not None and apply_sleeve(selected_sleeve, clicked_card):
+                    current_state = MAP
+
+
+
+
+
+        if current_state == GAME_OVER:
+            if play_again_button.is_clicked(event.pos):
+                # Reset board state, then return to character select for a fresh run.
+                party = []
+                selected_character = None
+                selected_character_index = 0
+                player_grid_data = create_grid_data("player")
+                enemy_grid_data = create_grid_data("enemy")
+                enemies.clear()
+
+                selected_card_index = None
+                reset_battle_input_state()
+                team_special_charge = 0
+                character_select_state["selected_party"].clear()
+                map_layers = []
+                reset_battle_animation_state()
+
+                current_turn = PLAYER_TURN
+                current_state = CHARACTER_SELECT
+                battle_number = 0
+                last_battle_room = None
+
+            if game_over_quit_button.is_clicked(event.pos):
+                running = False
 
     deck_scroll_y += (target_deck_scroll_y - deck_scroll_y) * 0.2
     pile_scroll_y += (target_pile_scroll_y - pile_scroll_y) * 0.2
@@ -1868,16 +2028,20 @@ while running:
     screen.fill(DARK_BG)
 
     if current_state == HOME_MENU:
-        # Home menu draws only the global Start/Quit choices.
-        start_button.draw(screen, font)
-        quit_button.draw(screen, font)
-        card_editor_button.draw(screen,font)
+        draw_home_menu(screen, font, start_button, quit_button, card_editor_button)
 
     if current_state == CHARACTER_SELECT:
-        # Character select currently starts the fixed Archer + Warrior party.
-        title_text = font.render("Character Select", True, WHITE)
-        screen.blit(title_text, (430, 180))
-        archer_button.draw(screen, font)
+        draw_character_select_screen(
+            screen,
+            font,
+            parchment_font,
+            archer_button,
+            warrior_button,
+            character_start_button,
+            character_select_assets,
+            character_select_state["selected_party"],
+            pygame.mouse.get_pos()
+        )
     if current_state == MAP:
         draw_map_screen(screen, font, map_layers)
 
@@ -2038,11 +2202,17 @@ while running:
         if shove_mode:
             enemy_preview_tiles = get_shove_preview_tiles()
 
+        if team_special_aim_mode:
+            enemy_preview_tiles = get_team_special_preview_tiles()
+
         draw_battle(
             screen,
             font,
             end_turn_button,
             play_card_button,
+            team_special_button,
+            team_special_charge,
+            TEAM_SPECIAL_MAX_CHARGE,
             party,
             selected_character,
             current_energy,
@@ -2080,7 +2250,13 @@ while running:
             draw_swing_choice_popup(screen, font, small_font)
 
         if discard_choice_mode:
-            draw_discard_choice_overlay(screen, font, small_font)
+            draw_discard_choice_overlay(
+                screen,
+                font,
+                small_font,
+                discard_choice_prompt,
+                pending_chosen_discards
+            )
 
         hand_mouse_pos = mouse_pos
         if discard_choice_mode:
@@ -2096,7 +2272,7 @@ while running:
             reaction_card_indices
         )
 
-        draw_discard_animation(screen, selected_character)
+        draw_discard_animation(screen, selected_character, discard_animation)
 
         if not discard_choice_mode:
             draw_pile_buttons(screen, small_font, len(draw_pile), len(discard_pile))
@@ -2113,6 +2289,10 @@ while running:
         if reaction_mode:
             reaction_text = font.render("Reaction! Click a red card or press G", True, WHITE)
             screen.blit(reaction_text, (310, 720))
+
+        if team_special_aim_mode:
+            special_text = font.render("Team Special: click an enemy tile to aim the cross.", True, WHITE)
+            screen.blit(special_text, (250, 720))
 
         if current_state == GAME_OVER:
             draw_game_over_menu(screen, font, play_again_button, game_over_quit_button)

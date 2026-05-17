@@ -121,9 +121,45 @@ CARD_LIBRARY = {
         "trap_radius": 1,
         "description": "Set a trap on the enemy board. Radius 1. Lasts 4 turns.",
         "image_path": "assets/card_templtes/card art/Snare_trap.png"
+    },
+
+    "mule_kick": {
+        "name": "Mule Kick",
+        "cost": 2,
+        "thickness": 0.5,
+        "type": "attack",
+        "rarity": "uncommon",
+        "effect": "mule_kick",
+        "damage": 6,
+        "shove_distance": 2,
+        "usable_characters": ["Archer", "Warrior"],
+        "character_values": {
+            "Archer": {
+                "damage": 6,
+                "shove_distance": 2
+            },
+            "Warrior": {
+                "damage": 9,
+                "shove_distance": 3
+            }
+        },
+        "description": "Kick the enemy behind you for {damage} damage, then shove it {shove_distance}.",
+        "image_path": "assets/card_templtes/card art/muel_kick.jpg"
+    },
+
+    "reckless_charge": {
+        "name": "Reckless Charge",
+        "cost": 2,
+        "thickness": 0.5,
+        "type": "attack",
+        "rarity": "rare",
+        "effect": "reckless_charge",
+        "damage": 10,
+        "move_distance": 2,
+        "usable_characters": ["Warrior"],
+        "can_react": False,
+        "description": "Charge forward {move_distance} spaces. Deal {damage} damage to enemies in those lanes.",
+        "image_path": "assets/card_templtes/card art/axe swing.jpg"
     }
 
 }
-from cards.custom_card_loader import load_custom_cards
-
-CARD_LIBRARY.update(load_custom_cards())

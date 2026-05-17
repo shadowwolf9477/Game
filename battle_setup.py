@@ -4,6 +4,10 @@ from movement import move_unit, can_land_on_tile
 from party_manager import characters_are_adjacent
 
 RANDOM_BATTLE_ROOMS = ["orc_goblins", "bone_pack", "web_ambush"]
+BASIC_MAX_TILE_PRESSURE = 1
+HEAVY_MAX_TILE_PRESSURE = 2
+DEBUFF_MAX_TILE_PRESSURE = 1
+IMPERFECT_AIM_CHANCE = 0.35
 
 
 def start_tutorial_battle(enemies, enemy_grid_data):
@@ -101,15 +105,15 @@ def start_bone_pack_battle(enemies, enemy_grid_data):
         "board": "enemy",
         "row": 1,
         "col": 2,
-        "hp": 45,
-        "max_hp": 45,
+        "hp": 60,
+        "max_hp": 60,
         "attack_damage": 10,
         "attack_interval": 2,
         "turns_until_attack": 2,
         "heal_interval": 3,
         "turns_until_heal": 3,
         "heal_amount": 5,
-        "ally_death_bonus": 0,
+        "spawn_bonus": 0,
         "flip_x": True
     }
 
@@ -265,9 +269,6 @@ def handle_enemy_deaths(enemies, enemy_grid_data):
     dead_enemies = [enemy for enemy in enemies if enemy["hp"] <= 0]
 
     if dead_enemies:
-        for enemy in dead_enemies:
-            notify_bone_callers_of_death(enemies, enemy)
-
         enemies[:] = [enemy for enemy in enemies if enemy["hp"] > 0]
         sync_enemy_grid(enemies, enemy_grid_data)
 
@@ -277,6 +278,7 @@ def handle_enemy_splits(enemies, enemy_grid_data):
         enemy for enemy in enemies
         if enemy["type"] == "skeleton"
         and enemy.get("can_split", False)
+        and enemy["hp"] > 1
         and enemy["hp"] <= enemy["split_threshold"]
     ]
 
@@ -286,33 +288,46 @@ def handle_enemy_splits(enemies, enemy_grid_data):
     sync_enemy_grid(enemies, enemy_grid_data)
 
 
-def notify_bone_callers_of_death(enemies, dead_enemy):
-    if dead_enemy["type"] == "bone_caller":
-        return
-
+def notify_bone_callers_of_spawn(enemies, spawned_enemy_count):
     for enemy in enemies:
         if enemy["type"] == "bone_caller" and enemy["hp"] > 0:
-            enemy["ally_death_bonus"] += 1
+            enemy["spawn_bonus"] = enemy.get("spawn_bonus", 0) + spawned_enemy_count
 
 
 def split_skeleton(skeleton, enemies, enemy_grid_data):
-    split_hp = max(1, skeleton["max_hp"] // 2)
+    first_split_hp, second_split_hp = split_remaining_hp(skeleton["hp"])
     split_damage = max(1, skeleton["attack_damage"] // 2)
     split_range = max(1, skeleton.get("attack_range", 1) // 2)
     split_tiles = [(skeleton["row"], skeleton["col"])]
     split_tiles.extend(get_empty_adjacent_enemy_tiles(skeleton, enemy_grid_data))
 
     enemies.remove(skeleton)
+    spawned_enemy_count = 0
 
     for tile_index, (row, col) in enumerate(split_tiles[:2]):
+        split_hp = first_split_hp
+
+        if tile_index == 1:
+            split_hp = second_split_hp
+
         new_skeleton = build_skeleton(row, col, split_hp, split_damage, split_range)
         new_skeleton["can_split"] = split_hp > 1
         copy_loaded_enemy_assets(skeleton, new_skeleton)
         enemies.append(new_skeleton)
+        spawned_enemy_count += 1
+
+    if spawned_enemy_count > 0:
+        notify_bone_callers_of_spawn(enemies, spawned_enemy_count)
 
     if len(split_tiles) == 0:
         skeleton["can_split"] = False
         enemies.append(skeleton)
+
+
+def split_remaining_hp(current_hp):
+    split_hp = max(1, current_hp // 2)
+
+    return split_hp, split_hp
 
 
 def copy_loaded_enemy_assets(source_enemy, target_enemy):
@@ -366,70 +381,135 @@ def prepare_enemy_attacks(enemies, player_grid_data):
 
 
 def choose_goblin_attack(enemy, player_grid_data):
-    # The current goblin pattern warns two random player tiles before damage.
+    target = get_lowest_hp_living_character_from_grid(player_grid_data)
+
+    if target is None:
+        add_random_attacks(enemy, player_grid_data, 2)
+        return
+
+    target_tiles = []
+    escape_tiles = get_adjacent_player_tiles(target["row"], target["col"])
+
+    if random.random() >= IMPERFECT_AIM_CHANCE:
+        target_tiles.append((target["row"], target["col"]))
+
+    if escape_tiles:
+        random.shuffle(escape_tiles)
+        target_tiles.extend(escape_tiles)
+
+    if not target_tiles:
+        target_tiles.append((target["row"], target["col"]))
+
+    add_low_pressure_attacks(
+        player_grid_data,
+        target_tiles,
+        enemy,
+        2,
+        BASIC_MAX_TILE_PRESSURE
+    )
+
+
+def add_random_attacks(enemy, player_grid_data, attack_count):
     all_tiles = []
 
     for row in range(GRID_ROWS):
         for col in range(GRID_COLS):
             all_tiles.append((row, col))
 
-    chosen_tiles = random.sample(all_tiles, 2)
-
-    for row, col in chosen_tiles:
-        add_incoming_attack(player_grid_data, row, col, enemy)
+    add_low_pressure_attacks(
+        player_grid_data,
+        all_tiles,
+        enemy,
+        attack_count,
+        BASIC_MAX_TILE_PRESSURE
+    )
 
 
 def choose_orc_attack(enemy, player_grid_data):
-    # Orc warns a compact heavy strike.
-    attack_height = 2
-    attack_width = 2
-    start_row = random.randint(0, GRID_ROWS - attack_height)
-    start_col = random.randint(0, max(0, GRID_COLS - min(attack_width, GRID_COLS)))
+    start_row, start_col = get_best_2x2_start_for_players(player_grid_data, enemy)
 
-    for row in range(start_row, min(start_row + attack_height, GRID_ROWS)):
-        for col in range(start_col, min(start_col + attack_width, GRID_COLS)):
-            add_incoming_attack(player_grid_data, row, col, enemy)
+    for row in range(start_row, min(start_row + 2, GRID_ROWS)):
+        for col in range(start_col, min(start_col + 2, GRID_COLS)):
+            add_pressure_limited_attack(
+                player_grid_data,
+                row,
+                col,
+                enemy,
+                HEAVY_MAX_TILE_PRESSURE
+            )
 
 
 def choose_bone_caller_attack(enemy, player_grid_data):
-    target_row = random.randint(0, GRID_ROWS - 1)
+    target_row = get_best_bone_caller_row(player_grid_data)
 
     for col in range(GRID_COLS):
-        add_incoming_attack(
+        add_pressure_limited_attack(
             player_grid_data,
             target_row,
             col,
             enemy,
-            enemy["attack_damage"] + enemy.get("ally_death_bonus", 0)
+            HEAVY_MAX_TILE_PRESSURE,
+            enemy["attack_damage"] + enemy.get("spawn_bonus", 0)
         )
 
 
 def choose_skeleton_attack(enemy, player_grid_data):
+    target = get_closest_living_character_from_grid(enemy, player_grid_data)
     target_row = enemy["row"]
+
+    if target is not None:
+        target_row = target["row"]
+
     attack_range = max(1, enemy.get("attack_range", 1))
-    target_cols = list(range(min(attack_range, GRID_COLS)))
+    target_cols = get_column_window_around_target(target, attack_range)
 
     for col in target_cols:
-        add_incoming_attack(player_grid_data, target_row, col, enemy)
+        add_pressure_limited_attack(
+            player_grid_data,
+            target_row,
+            col,
+            enemy,
+            BASIC_MAX_TILE_PRESSURE
+        )
 
 
 def choose_crawler_attack(enemy, player_grid_data):
-    target_row = enemy["row"]
-    target_col = enemy["col"]
+    target = get_closest_living_character_from_grid(enemy, player_grid_data)
 
-    add_incoming_attack(
+    if target is None:
+        target_row = enemy["row"]
+        target_col = enemy["col"]
+    else:
+        target_row = target["row"]
+        target_col = target["col"]
+
+    add_pressure_limited_attack(
         player_grid_data,
         target_row,
         target_col,
         enemy,
+        HEAVY_MAX_TILE_PRESSURE,
         status_effect=enemy["status_effect"],
         status_duration=enemy["status_duration"]
     )
 
 
 def choose_web_priest_attack(enemy, player_grid_data):
-    center_row = random.randint(0, GRID_ROWS - 1)
-    center_col = random.randint(0, GRID_COLS - 1)
+    target = get_most_exposed_living_character_from_grid(player_grid_data)
+
+    if target is None:
+        center_row = random.randint(0, GRID_ROWS - 1)
+        center_col = random.randint(0, GRID_COLS - 1)
+    else:
+        center_row = target["row"]
+        center_col = target["col"]
+
+        if random.random() < IMPERFECT_AIM_CHANCE:
+            nearby_tiles = get_adjacent_player_tiles(center_row, center_col)
+
+            if nearby_tiles:
+                center_row, center_col = random.choice(nearby_tiles)
+
     pattern = random.choice(["x", "plus"])
     target_tiles = []
 
@@ -449,16 +529,284 @@ def choose_web_priest_attack(enemy, player_grid_data):
 
     for row, col in target_tiles:
         if 0 <= row < GRID_ROWS and 0 <= col < GRID_COLS:
-            add_incoming_attack(
+            add_pressure_limited_attack(
                 player_grid_data,
                 row,
                 col,
                 enemy,
+                DEBUFF_MAX_TILE_PRESSURE,
                 status_effect=enemy["status_effect"],
                 status_duration=enemy["status_duration"],
                 random_discard_next_turn=1,
                 weak_attacks=2
             )
+
+
+def get_living_characters_from_grid(player_grid_data):
+    living_characters = []
+
+    for row in range(GRID_ROWS):
+        for col in range(GRID_COLS):
+            character = player_grid_data[row][col].get("unit")
+
+            if character is not None and character.get("current_hp", 0) > 0:
+                living_characters.append(character)
+
+    return living_characters
+
+
+def get_lowest_hp_living_character_from_grid(player_grid_data):
+    living_characters = get_living_characters_from_grid(player_grid_data)
+
+    if not living_characters:
+        return None
+
+    return min(living_characters, key=lambda character: character["current_hp"])
+
+
+def get_most_exposed_living_character_from_grid(player_grid_data):
+    living_characters = get_living_characters_from_grid(player_grid_data)
+
+    if not living_characters:
+        return None
+
+    return min(living_characters, key=lambda character: character.get("block", 0))
+
+
+def get_closest_living_character_from_grid(enemy, player_grid_data):
+    living_characters = get_living_characters_from_grid(player_grid_data)
+
+    if not living_characters:
+        return None
+
+    return min(
+        living_characters,
+        key=lambda character: get_tile_distance(
+            enemy["row"],
+            enemy["col"],
+            character["row"],
+            character["col"]
+        )
+    )
+
+
+def get_tile_distance(start_row, start_col, target_row, target_col):
+    return abs(start_row - target_row) + abs(start_col - target_col)
+
+
+def get_adjacent_player_tiles(row, col):
+    adjacent_tiles = []
+
+    for row_change, col_change in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
+        target_row = row + row_change
+        target_col = col + col_change
+
+        if 0 <= target_row < GRID_ROWS and 0 <= target_col < GRID_COLS:
+            adjacent_tiles.append((target_row, target_col))
+
+    return adjacent_tiles
+
+
+def get_most_crowded_player_row(player_grid_data):
+    living_characters = get_living_characters_from_grid(player_grid_data)
+
+    if not living_characters:
+        return random.randint(0, GRID_ROWS - 1)
+
+    row_scores = [0 for row in range(GRID_ROWS)]
+
+    for character in living_characters:
+        row_scores[character["row"]] += 1
+
+    best_score = max(row_scores)
+    best_rows = [
+        row for row, score in enumerate(row_scores)
+        if score == best_score
+    ]
+
+    return random.choice(best_rows)
+
+
+def get_best_bone_caller_row(player_grid_data):
+    living_characters = get_living_characters_from_grid(player_grid_data)
+
+    if not living_characters:
+        return get_lowest_pressure_row(player_grid_data)
+
+    best_row = 0
+    best_score = None
+
+    for row in range(GRID_ROWS):
+        player_count = sum(1 for character in living_characters if character["row"] == row)
+        pressure = get_row_pressure(player_grid_data, row)
+        score = player_count * 10 - pressure
+
+        if best_score is None or score > best_score:
+            best_score = score
+            best_row = row
+
+    return best_row
+
+
+def get_lowest_pressure_row(player_grid_data):
+    return min(
+        range(GRID_ROWS),
+        key=lambda row: get_row_pressure(player_grid_data, row)
+    )
+
+
+def get_best_2x2_start_for_players(player_grid_data, enemy):
+    living_characters = get_living_characters_from_grid(player_grid_data)
+
+    if not living_characters:
+        return (
+            random.randint(0, GRID_ROWS - 2),
+            random.randint(0, GRID_COLS - 2)
+        )
+
+    best_start = (0, 0)
+    best_score = None
+
+    for start_row in range(GRID_ROWS - 1):
+        for start_col in range(GRID_COLS - 1):
+            hit_count = 0
+            closest_distance = 99
+            pressure = 0
+
+            for character in living_characters:
+                in_box = (
+                    start_row <= character["row"] <= start_row + 1
+                    and start_col <= character["col"] <= start_col + 1
+                )
+
+                if in_box:
+                    hit_count += 1
+
+                closest_distance = min(
+                    closest_distance,
+                    get_tile_distance(start_row, start_col, character["row"], character["col"])
+                )
+
+            for row in range(start_row, start_row + 2):
+                for col in range(start_col, start_col + 2):
+                    pressure += get_tile_pressure(player_grid_data, row, col)
+
+            score = hit_count * 100 - closest_distance - pressure * 25
+
+            if best_score is None or score > best_score:
+                best_score = score
+                best_start = (start_row, start_col)
+
+    return best_start
+
+
+def get_column_window_around_target(target, attack_range):
+    if target is None:
+        return list(range(min(attack_range, GRID_COLS)))
+
+    half_range = attack_range // 2
+    start_col = target["col"] - half_range
+    end_col = start_col + attack_range
+
+    if start_col < 0:
+        end_col -= start_col
+        start_col = 0
+
+    if end_col > GRID_COLS:
+        start_col -= end_col - GRID_COLS
+        end_col = GRID_COLS
+
+    start_col = max(0, start_col)
+
+    return list(range(start_col, end_col))
+
+
+def get_tile_pressure(player_grid_data, row, col):
+    incoming_attack = player_grid_data[row][col].get("incoming_attack")
+
+    if incoming_attack is None:
+        return 0
+
+    return len(incoming_attack.get("attacks", []))
+
+
+def get_row_pressure(player_grid_data, row):
+    pressure = 0
+
+    for col in range(GRID_COLS):
+        pressure += get_tile_pressure(player_grid_data, row, col)
+
+    return pressure
+
+
+def add_low_pressure_attacks(
+    player_grid_data,
+    candidate_tiles,
+    enemy,
+    attack_count,
+    max_tile_pressure,
+    damage=None,
+    status_effect=None,
+    status_duration=None,
+    random_discard_next_turn=0,
+    weak_attacks=0
+):
+    unique_tiles = list(dict.fromkeys(candidate_tiles))
+    random.shuffle(unique_tiles)
+    unique_tiles.sort(key=lambda tile: get_tile_pressure(player_grid_data, tile[0], tile[1]))
+    attacks_added = 0
+
+    for row, col in unique_tiles:
+        if attacks_added >= attack_count:
+            break
+
+        attack_was_added = add_pressure_limited_attack(
+            player_grid_data,
+            row,
+            col,
+            enemy,
+            max_tile_pressure,
+            damage,
+            status_effect,
+            status_duration,
+            random_discard_next_turn,
+            weak_attacks
+        )
+
+        if attack_was_added:
+            attacks_added += 1
+
+    return attacks_added
+
+
+def add_pressure_limited_attack(
+    player_grid_data,
+    row,
+    col,
+    enemy,
+    max_tile_pressure,
+    damage=None,
+    status_effect=None,
+    status_duration=None,
+    random_discard_next_turn=0,
+    weak_attacks=0
+):
+    if get_tile_pressure(player_grid_data, row, col) >= max_tile_pressure:
+        return False
+
+    add_incoming_attack(
+        player_grid_data,
+        row,
+        col,
+        enemy,
+        damage,
+        status_effect,
+        status_duration,
+        random_discard_next_turn,
+        weak_attacks
+    )
+
+    return True
 
 
 def add_incoming_attack(
@@ -714,15 +1062,18 @@ def get_enemy_random_movement_steps(enemy, enemy_grid_data):
 
 def get_enemy_possible_movement_tiles(enemy, enemy_grid_data, party):
     if enemy["type"] == "orc":
-        return get_orc_possible_movement_tiles(enemy, enemy_grid_data)
+        return get_orc_possible_movement_tiles(enemy, enemy_grid_data, party)
 
     if enemy["type"] == "skeleton":
-        return get_skeleton_possible_movement_tiles(enemy, enemy_grid_data)
+        return get_skeleton_possible_movement_tiles(enemy, enemy_grid_data, party)
 
     if enemy["type"] == "crawler":
         return get_crawler_possible_movement_tiles(enemy, enemy_grid_data, party)
 
-    return get_random_step_possible_movement_tiles(enemy, enemy_grid_data)
+    if enemy["type"] in ["bone_caller", "web_priest"]:
+        return get_support_enemy_possible_movement_tiles(enemy, enemy_grid_data, party)
+
+    return get_goblin_possible_movement_tiles(enemy, enemy_grid_data, party)
 
 
 def get_random_step_possible_movement_tiles(enemy, enemy_grid_data):
@@ -739,7 +1090,59 @@ def get_random_step_possible_movement_tiles(enemy, enemy_grid_data):
     return possible_tiles
 
 
-def get_skeleton_possible_movement_tiles(enemy, enemy_grid_data):
+def get_goblin_possible_movement_tiles(enemy, enemy_grid_data, party):
+    preferred_steps = get_chase_preferred_steps(enemy, party)
+    possible_tiles = []
+
+    for row_change, col_change in preferred_steps:
+        next_row = enemy["row"] + row_change
+        next_col = enemy["col"] + col_change
+
+        if can_land_on_tile(enemy_grid_data, next_row, next_col, enemy):
+            possible_tiles.append((next_row, next_col))
+
+    if possible_tiles:
+        return possible_tiles
+
+    return get_random_step_possible_movement_tiles(enemy, enemy_grid_data)
+
+
+def get_goblin_movement_steps(enemy, enemy_grid_data, party):
+    return get_one_step_movement_toward_goal(enemy, enemy_grid_data, party)
+
+
+def get_support_enemy_possible_movement_tiles(enemy, enemy_grid_data, party):
+    possible_tiles = get_random_step_possible_movement_tiles(enemy, enemy_grid_data)
+    target = get_closest_living_character(enemy, party)
+
+    if target is None:
+        return possible_tiles
+
+    possible_tiles.sort(
+        key=lambda tile: get_tile_distance(tile[0], tile[1], target["row"], target["col"]),
+        reverse=True
+    )
+
+    return possible_tiles
+
+
+def get_support_enemy_movement_steps(enemy, enemy_grid_data, party):
+    possible_tiles = get_support_enemy_possible_movement_tiles(enemy, enemy_grid_data, party)
+
+    if not possible_tiles:
+        return []
+
+    target_row, target_col = possible_tiles[0]
+
+    return [{
+        "enemy": enemy,
+        "row_change": target_row - enemy["row"],
+        "col_change": target_col - enemy["col"],
+        "is_final_step": True
+    }]
+
+
+def get_skeleton_possible_movement_tiles(enemy, enemy_grid_data, party=None):
     possible_tiles = []
 
     for row_change in range(-2, 3):
@@ -756,27 +1159,34 @@ def get_skeleton_possible_movement_tiles(enemy, enemy_grid_data):
             if can_land_on_tile(enemy_grid_data, target_row, target_col, enemy):
                 possible_tiles.append((target_row, target_col))
 
+    target = get_closest_living_character(enemy, party) if party is not None else None
+
+    if target is not None:
+        possible_tiles.sort(
+            key=lambda tile: get_tile_distance(tile[0], tile[1], target["row"], target["col"])
+        )
+
     return possible_tiles
 
 
-def get_skeleton_movement_steps(enemy, enemy_grid_data):
-    possible_tiles = get_skeleton_possible_movement_tiles(enemy, enemy_grid_data)
+def get_skeleton_movement_steps(enemy, enemy_grid_data, party=None):
+    possible_tiles = get_skeleton_possible_movement_tiles(enemy, enemy_grid_data, party)
 
     if not possible_tiles:
         return []
 
-    target_row, target_col = random.choice(possible_tiles)
-    row_change = target_row - enemy["row"]
-    col_change = target_col - enemy["col"]
-    step_paths = [
-        build_step_path(enemy, row_change, col_change, True),
-        build_step_path(enemy, row_change, col_change, False)
-    ]
-    random.shuffle(step_paths)
+    for target_row, target_col in possible_tiles:
+        row_change = target_row - enemy["row"]
+        col_change = target_col - enemy["col"]
+        step_paths = [
+            build_step_path(enemy, row_change, col_change, True),
+            build_step_path(enemy, row_change, col_change, False)
+        ]
+        random.shuffle(step_paths)
 
-    for step_path in step_paths:
-        if path_is_clear(enemy, enemy_grid_data, step_path):
-            return step_path
+        for step_path in step_paths:
+            if path_is_clear(enemy, enemy_grid_data, step_path):
+                return step_path
 
     return []
 
@@ -825,6 +1235,28 @@ def get_crawler_movement_steps(enemy, enemy_grid_data, party):
 
 
 def get_crawler_preferred_steps(enemy, party):
+    return get_chase_preferred_steps(enemy, party)
+
+
+def get_one_step_movement_toward_goal(enemy, enemy_grid_data, party):
+    preferred_steps = get_chase_preferred_steps(enemy, party)
+
+    for row_change, col_change in preferred_steps:
+        next_row = enemy["row"] + row_change
+        next_col = enemy["col"] + col_change
+
+        if can_land_on_tile(enemy_grid_data, next_row, next_col, enemy):
+            return [{
+                "enemy": enemy,
+                "row_change": row_change,
+                "col_change": col_change,
+                "is_final_step": True
+            }]
+
+    return get_enemy_random_movement_steps(enemy, enemy_grid_data)
+
+
+def get_chase_preferred_steps(enemy, party):
     target_character = get_closest_living_character(enemy, party)
 
     if target_character is None:
@@ -892,7 +1324,7 @@ def move_orc_like_knight(enemy, enemy_grid_data):
             return
 
 
-def get_orc_knight_movement_steps(enemy, enemy_grid_data):
+def get_orc_knight_movement_steps(enemy, enemy_grid_data, party=None):
     knight_moves = [
         (-2, -1),
         (-2, 1),
@@ -903,7 +1335,19 @@ def get_orc_knight_movement_steps(enemy, enemy_grid_data):
         (2, -1),
         (2, 1)
     ]
-    random.shuffle(knight_moves)
+    target_character = get_closest_living_character(enemy, party) if party is not None else None
+
+    if target_character is not None:
+        knight_moves.sort(
+            key=lambda move: get_tile_distance(
+                enemy["row"] + move[0],
+                enemy["col"] + move[1],
+                target_character["row"],
+                target_character["col"]
+            )
+        )
+    else:
+        random.shuffle(knight_moves)
 
     for row_change, col_change in knight_moves:
         target_row = enemy["row"] + row_change
@@ -925,7 +1369,7 @@ def get_orc_knight_movement_steps(enemy, enemy_grid_data):
     return []
 
 
-def get_orc_possible_movement_tiles(enemy, enemy_grid_data):
+def get_orc_possible_movement_tiles(enemy, enemy_grid_data, party=None):
     possible_tiles = []
     knight_moves = [
         (-2, -1),
@@ -954,6 +1398,13 @@ def get_orc_possible_movement_tiles(enemy, enemy_grid_data):
             if path_is_clear(enemy, enemy_grid_data, step_path):
                 possible_tiles.append((target_row, target_col))
                 break
+
+    target_character = get_closest_living_character(enemy, party) if party is not None else None
+
+    if target_character is not None:
+        possible_tiles.sort(
+            key=lambda tile: get_tile_distance(tile[0], tile[1], target_character["row"], target_character["col"])
+        )
 
     return possible_tiles
 

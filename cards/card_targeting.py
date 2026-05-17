@@ -67,6 +67,38 @@ def get_card_preview_tiles(card, selected_character, swing_direction="right", at
 
         return preview_tiles
 
+    if card["effect"] == "mule_kick":
+        player_row = selected_character["row"]
+        player_col = selected_character["col"]
+        attack_direction = get_character_attack_direction(selected_character)
+
+        if attack_direction == "back":
+            target_col = player_col + 1
+        else:
+            target_col = player_col - 1
+
+        if 0 <= target_col < GRID_COLS:
+            return [(player_row, target_col)]
+
+        return []
+
+    if card["effect"] == "reckless_charge":
+        player_row = selected_character["row"]
+        player_col = selected_character["col"]
+        attack_direction = get_character_attack_direction(selected_character)
+        preview_tiles = []
+
+        for distance in range(1, card.get("move_distance", 2) + 1):
+            if attack_direction == "back":
+                enemy_col = player_col - distance
+            else:
+                enemy_col = player_col + distance
+
+            if 0 <= enemy_col < GRID_COLS:
+                preview_tiles.append((player_row, enemy_col))
+
+        return preview_tiles
+
     if card["effect"] == "trap":
         center_row = selected_character["row"]
         center_col = selected_character["col"]
